@@ -66,7 +66,7 @@ func (o *RunOptions) PrintRawOptions(cmd *cobra.Command) {
 
 func (o *RunOptions) PrintCompleted(cmd *cobra.Command) {
 	raw := map[string]any{
-		"accessRequestServiceAccountNamespace": o.AccessRequestServiceAccountNamespace,
+		// TODO add options or remove
 	}
 	data, err := yaml.Marshal(raw)
 	if err != nil {
