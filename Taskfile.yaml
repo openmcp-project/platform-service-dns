@@ -6,9 +6,9 @@ includes:
     flatten: true
     excludes: [] # put task names in here which are overwritten in this file
     vars:
-      # NESTED_MODULES: api
-      # API_DIRS: '{{.ROOT_DIR}}/api/...'
-      # MANIFEST_OUT: '{{.ROOT_DIR}}/api/crds/manifests'
+      NESTED_MODULES: api
+      API_DIRS: '{{.ROOT_DIR}}/api/...'
+      MANIFEST_OUT: '{{.ROOT_DIR}}/api/crds/manifests'
       CODE_DIRS: '{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/...'
       COMPONENTS: 'platform-service-dns'
       REPO_URL: 'https://github.com/openmcp-project/platform-service-dns'

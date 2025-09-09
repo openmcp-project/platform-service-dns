@@ -1,6 +1,8 @@
 module github.com/openmcp-project/platform-service-dns
 
-go 1.24.5
+go 1.25.1
+
+replace github.com/openmcp-project/platform-service-dns/api => ./api
 
 require (
 	github.com/openmcp-project/controller-utils v0.13.1
