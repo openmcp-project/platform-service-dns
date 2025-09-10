@@ -1,5 +1,5 @@
 // +kubebuilder:object:generate=true
-// +groupName=clusters.openmcp.cloud
+// +groupName=dns.openmcp.cloud
 package v1alpha1
 
 import (
@@ -9,7 +9,7 @@ import (
 	apiconst "github.com/openmcp-project/openmcp-operator/api/constants"
 )
 
-const GroupName = "clusters." + apiconst.OpenMCPGroupName
+const GroupName = "dns." + apiconst.OpenMCPGroupName
 
 var (
 	// GroupVersion is group version used to register these objects

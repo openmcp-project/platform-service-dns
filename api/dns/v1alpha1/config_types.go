@@ -1,26 +1,65 @@
 package v1alpha1
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"slices"
 
-	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // DNSServiceConfigSpec defines the desired state of DNSServiceConfig
 type DNSServiceConfigSpec struct {
+	// Selector is a label selector.
+	// If not nil, only Clusters that match the selector will be reconciled by the controller.
+	// +optional
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
+
+	// ExternalDNSForPurposes is a list of DNS configurations in combination with purpose selectors.
+	// The first matching purpose selector will be applied to the Cluster.
+	// If no selector matches, no configuration will be applied.
+	// +optional
+	ExternalDNSForPurposes []ExternalDNSPurposeConfig `json:"externalDNSForPurposes,omitempty"`
+}
+
+// ExternalDNSPurposeConfig holds a purpose selector and the DNS configuration to apply if the selector matches.
+type ExternalDNSPurposeConfig struct {
+	// Name is an optional name.
+	// It can be set to more easily identify the configuration in logs and events.
+	// +optional
+	Name string `json:"name,omitempty"`
+	// PurposeSelector is a selector to match against the list of purposes of a Cluster.
+	// If not set, all Clusters are matched.
+	// +optional
+	PurposeSelector *PurposeSelector `json:"purposeSelector,omitempty"`
+	// Config is the DNS configuration to apply if the selector matches.
+	Config ExternalDNSConfig `json:"config"`
+}
+
+// PurposeSelector is a selector to match against the list of purposes of a Cluster.
+type PurposeSelector struct {
+	PurposeSelectorRequirement `json:",inline"`
+}
+
+// PurposeSelectorRequirement is a selector to select purposes to apply the configuration to.
+// The struct can be combined recursively using "and", "or" and "not" to build complex selectors.
+// Exactly one of the fields must be set.
+// If name is set, the selector matches if the Cluster's purposes contain the given name.
+// If and is set, the selector matches if all of the contained selectors match.
+// If or is set, the selector matches if any of the contained selectors match.
+// If not is set, the selector matches if the contained selector does not match.
+// +kubebuilder:validation:XValidation:rule=`size(self.filter(property, size(self[property]) > 0)) == 1`, message="Exactly one of 'and', 'or', 'not' or 'name' must be set"
+type PurposeSelectorRequirement struct {
+	And  []PurposeSelectorRequirement `json:"and,omitempty"`
+	Or   []PurposeSelectorRequirement `json:"or,omitempty"`
+	Not  *PurposeSelectorRequirement  `json:"not,omitempty"`
+	Name string                       `json:"name,omitempty"`
+}
+
+type ExternalDNSConfig struct {
 	// TODO
 }
 
-// DNSServiceConfigStatus defines the observed state of DNSServiceConfig
-type DNSServiceConfigStatus struct {
-	commonapi.Status `json:",inline"`
-}
-
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
 // +kubebuilder:metadata:labels="openmcp.cloud/cluster=platform"
-// +kubebuilder:selectablefield:JSONPath=".spec.profile"
-// +kubebuilder:printcolumn:JSONPath=`.status.phase`,name="Phase",type=string
 // +kubebuilder:resource:scope=Cluster,shortName=dnscfg
 
 // DNSServiceConfig is the Schema for the DNS PlatformService configuration API
@@ -28,8 +67,7 @@ type DNSServiceConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DNSServiceConfigSpec   `json:"spec,omitempty"`
-	Status DNSServiceConfigStatus `json:"status,omitempty"`
+	Spec DNSServiceConfigSpec `json:"spec,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -43,4 +81,46 @@ type DNSServiceConfigList struct {
 
 func init() {
 	SchemeBuilder.Register(&DNSServiceConfig{}, &DNSServiceConfigList{})
+}
+
+// Matches returns true if the selector matches the given list of purposes.
+func (ps *PurposeSelector) Matches(purposes []string) bool {
+	return requirementMatches(&ps.PurposeSelectorRequirement, purposes, map[*PurposeSelectorRequirement]empty{})
+}
+
+type empty struct{}
+
+func requirementMatches(r *PurposeSelectorRequirement, purposes []string, seenRequirements map[*PurposeSelectorRequirement]empty) bool {
+	if r == nil {
+		return true
+	}
+	if _, ok := seenRequirements[r]; ok {
+		panic("circular reference in PurposeSelectorRequirement")
+	}
+	seenRequirements[r] = empty{}
+	defer delete(seenRequirements, r)
+
+	if r.Name != "" {
+		return slices.Contains(purposes, r.Name)
+	}
+	if len(r.And) > 0 {
+		for i := range r.And {
+			if !requirementMatches(&r.And[i], purposes, seenRequirements) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(r.Or) > 0 {
+		for i := range r.Or {
+			if requirementMatches(&r.Or[i], purposes, seenRequirements) {
+				return true
+			}
+		}
+		return false
+	}
+	if r.Not != nil {
+		return !requirementMatches(r.Not, purposes, seenRequirements)
+	}
+	return false
 }
