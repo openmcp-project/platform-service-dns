@@ -3,6 +3,7 @@ module github.com/openmcp-project/platform-service-dns/api
 go 1.25.1
 
 require (
+	github.com/fluxcd/source-controller/api v1.6.2
 	github.com/openmcp-project/openmcp-operator/api v0.14.0
 	k8s.io/apiextensions-apiserver v0.34.0
 	k8s.io/apimachinery v0.34.0
@@ -11,6 +12,8 @@ require (
 )
 
 require (
+	github.com/fluxcd/pkg/apis/acl v0.7.0 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.12.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

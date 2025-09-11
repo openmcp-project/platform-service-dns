@@ -5,6 +5,7 @@ go 1.25.1
 replace github.com/openmcp-project/platform-service-dns/api => ./api
 
 require (
+	github.com/fluxcd/source-controller/api v1.6.2
 	github.com/openmcp-project/controller-utils v0.19.0
 	github.com/openmcp-project/openmcp-operator/api v0.14.0
 	github.com/openmcp-project/openmcp-operator/lib v0.14.1-0.20250910074108-2166b543cee3
@@ -28,6 +29,8 @@ require (
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fluxcd/pkg/apis/acl v0.7.0 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.12.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
