@@ -149,7 +149,8 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request
 		if len(ControllerName+"--"+localName) > 63 {
 			localName = ctrlutils.K8sNameUUIDUnsafe(c.Name)
 		}
-		access, ar, err := accessMgr.WaitForClusterAccess(ctx, localName, nil, &commonapi.ObjectReference{
+		// TODO: use access
+		_, ar, err := accessMgr.WaitForClusterAccess(ctx, localName, nil, &commonapi.ObjectReference{
 			Name:      c.Name,
 			Namespace: c.Namespace,
 		}, accesslib.ReferenceToCluster, []clustersv1alpha1.PermissionsRequest{

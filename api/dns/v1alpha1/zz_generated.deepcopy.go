@@ -7,7 +7,7 @@ package v1alpha1
 import (
 	apiv1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
