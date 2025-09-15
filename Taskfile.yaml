@@ -1,0 +1,18 @@
+version: 3
+
+includes:
+  shared:
+    taskfile: hack/common/Taskfile_controller.yaml
+    flatten: true
+    excludes: [] # put task names in here which are overwritten in this file
+    vars:
+      NESTED_MODULES: api
+      API_DIRS: '{{.ROOT_DIR}}/api/...'
+      MANIFEST_OUT: '{{.ROOT_DIR}}/api/crds/manifests'
+      CODE_DIRS: '{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/...'
+      COMPONENTS: platform-service-dns
+      REPO_URL: 'https://github.com/openmcp-project/platform-service-dns'
+      GENERATE_DOCS_INDEX: "false"
+      CHART_COMPONENTS: "[]"
+      CRDS_COMPONENTS: platform-service-dns
+      CRDS_PATH: '{{.ROOT_DIR}}/api/crds/manifests'

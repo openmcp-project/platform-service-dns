@@ -1,0 +1,709 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    openmcp.cloud/cluster: platform
+  name: dnsserviceconfigs.dns.openmcp.cloud
+spec:
+  group: dns.openmcp.cloud
+  names:
+    kind: DNSServiceConfig
+    listKind: DNSServiceConfigList
+    plural: dnsserviceconfigs
+    shortNames:
+    - dnscfg
+    singular: dnsserviceconfig
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: DNSServiceConfig is the Schema for the DNS PlatformService configuration
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: DNSServiceConfigSpec defines the desired state of DNSServiceConfig
+            properties:
+              externalDNSForPurposes:
+                description: |-
+                  ExternalDNSForPurposes is a list of DNS configurations in combination with purpose selectors.
+                  The first matching purpose selector will be applied to the Cluster.
+                  If no selector matches, no configuration will be applied.
+                items:
+                  description: ExternalDNSPurposeConfig holds a purpose selector and
+                    the DNS configuration to apply if the selector matches.
+                  properties:
+                    config:
+                      description: HelmValues are the helm values to deploy external-dns
+                        with, if the purpose selector matches.
+                    name:
+                      description: |-
+                        Name is an optional name.
+                        It can be set to more easily identify the configuration in logs and events.
+                      type: string
+                    purposeSelector:
+                      description: |-
+                        PurposeSelector is a selector to match against the list of purposes of a Cluster.
+                        If not set, all Clusters are matched.
+                      properties:
+                        and:
+                          items: {}
+                          type: array
+                        name:
+                          type: string
+                        not: {}
+                        or:
+                          items: {}
+                          type: array
+                      type: object
+                      x-kubernetes-validations:
+                      - message: Exactly one of 'and', 'or', 'not' or 'name' must
+                          be set
+                        rule: size(self.filter(property, size(self[property]) > 0))
+                          == 1
+                  required:
+                  - config
+                  type: object
+                type: array
+              externalDNSSource:
+                description: ExternalDNSSource is the source of the external-dns helm
+                  chart.
+                properties:
+                  copyAuthSecret:
+                    description: |-
+                      SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                      If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
+                    properties:
+                      source:
+                        description: ObjectReference is a reference to an object in
+                          any namespace.
+                        properties:
+                          name:
+                            description: Name is the name of the object.
+                            type: string
+                          namespace:
+                            description: Namespace is the namespace of the object.
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      target:
+                        description: ObjectReference is a reference to an object in
+                          any namespace.
+                        properties:
+                          name:
+                            description: Name is the name of the object.
+                            type: string
+                          namespace:
+                            description: Namespace is the namespace of the object.
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                    required:
+                    - source
+                    - target
+                    type: object
+                  git:
+                    description: |-
+                      GitRepositorySpec specifies the required configuration to produce an
+                      Artifact for a Git repository.
+                    properties:
+                      ignore:
+                        description: |-
+                          Ignore overrides the set of excluded patterns in the .sourceignore format
+                          (which is the same as .gitignore). If not provided, a default will be used,
+                          consult the documentation for your version to find out what those are.
+                        type: string
+                      include:
+                        description: |-
+                          Include specifies a list of GitRepository resources which Artifacts
+                          should be included in the Artifact produced for this GitRepository.
+                        items:
+                          description: |-
+                            GitRepositoryInclude specifies a local reference to a GitRepository which
+                            Artifact (sub-)contents must be included, and where they should be placed.
+                          properties:
+                            fromPath:
+                              description: |-
+                                FromPath specifies the path to copy contents from, defaults to the root
+                                of the Artifact.
+                              type: string
+                            repository:
+                              description: |-
+                                GitRepositoryRef specifies the GitRepository which Artifact contents
+                                must be included.
+                              properties:
+                                name:
+                                  description: Name of the referent.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            toPath:
+                              description: |-
+                                ToPath specifies the path to copy contents to, defaults to the name of
+                                the GitRepositoryRef.
+                              type: string
+                          required:
+                          - repository
+                          type: object
+                        type: array
+                      interval:
+                        description: |-
+                          Interval at which the GitRepository URL is checked for updates.
+                          This interval is approximate and may be subject to jitter to ensure
+                          efficient use of resources.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                      provider:
+                        description: |-
+                          Provider used for authentication, can be 'azure', 'github', 'generic'.
+                          When not specified, defaults to 'generic'.
+                        enum:
+                        - generic
+                        - azure
+                        - github
+                        type: string
+                      proxySecretRef:
+                        description: |-
+                          ProxySecretRef specifies the Secret containing the proxy configuration
+                          to use while communicating with the Git server.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      recurseSubmodules:
+                        description: |-
+                          RecurseSubmodules enables the initialization of all submodules within
+                          the GitRepository as cloned from the URL, using their default settings.
+                        type: boolean
+                      ref:
+                        description: |-
+                          Reference specifies the Git reference to resolve and monitor for
+                          changes, defaults to the 'master' branch.
+                        properties:
+                          branch:
+                            description: Branch to check out, defaults to 'master'
+                              if no other field is defined.
+                            type: string
+                          commit:
+                            description: |-
+                              Commit SHA to check out, takes precedence over all reference fields.
+
+                              This can be combined with Branch to shallow clone the branch, in which
+                              the commit is expected to exist.
+                            type: string
+                          name:
+                            description: |-
+                              Name of the reference to check out; takes precedence over Branch, Tag and SemVer.
+
+                              It must be a valid Git reference: https://git-scm.com/docs/git-check-ref-format#_description
+                              Examples: "refs/heads/main", "refs/tags/v0.1.0", "refs/pull/420/head", "refs/merge-requests/1/head"
+                            type: string
+                          semver:
+                            description: SemVer tag expression to check out, takes
+                              precedence over Tag.
+                            type: string
+                          tag:
+                            description: Tag to check out, takes precedence over Branch.
+                            type: string
+                        type: object
+                      secretRef:
+                        description: |-
+                          SecretRef specifies the Secret containing authentication credentials for
+                          the GitRepository.
+                          For HTTPS repositories the Secret must contain 'username' and 'password'
+                          fields for basic auth or 'bearerToken' field for token auth.
+                          For SSH repositories the Secret must contain 'identity'
+                          and 'known_hosts' fields.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      sparseCheckout:
+                        description: |-
+                          SparseCheckout specifies a list of directories to checkout when cloning
+                          the repository. If specified, only these directories are included in the
+                          Artifact produced for this GitRepository.
+                        items:
+                          type: string
+                        type: array
+                      suspend:
+                        description: |-
+                          Suspend tells the controller to suspend the reconciliation of this
+                          GitRepository.
+                        type: boolean
+                      timeout:
+                        default: 60s
+                        description: Timeout for Git operations like cloning, defaults
+                          to 60s.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m))+$
+                        type: string
+                      url:
+                        description: URL specifies the Git repository URL, it can
+                          be an HTTP/S or SSH address.
+                        pattern: ^(http|https|ssh)://.*$
+                        type: string
+                      verify:
+                        description: |-
+                          Verification specifies the configuration to verify the Git commit
+                          signature(s).
+                        properties:
+                          mode:
+                            default: HEAD
+                            description: |-
+                              Mode specifies which Git object(s) should be verified.
+
+                              The variants "head" and "HEAD" both imply the same thing, i.e. verify
+                              the commit that the HEAD of the Git repository points to. The variant
+                              "head" solely exists to ensure backwards compatibility.
+                            enum:
+                            - head
+                            - HEAD
+                            - Tag
+                            - TagAndHEAD
+                            type: string
+                          secretRef:
+                            description: |-
+                              SecretRef specifies the Secret containing the public keys of trusted Git
+                              authors.
+                            properties:
+                              name:
+                                description: Name of the referent.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        required:
+                        - secretRef
+                        type: object
+                    required:
+                    - interval
+                    - url
+                    type: object
+                  helm:
+                    description: |-
+                      HelmRepositorySpec specifies the required configuration to produce an
+                      Artifact for a Helm repository index YAML.
+                    properties:
+                      accessFrom:
+                        description: |-
+                          AccessFrom specifies an Access Control List for allowing cross-namespace
+                          references to this object.
+                          NOTE: Not implemented, provisional as of https://github.com/fluxcd/flux2/pull/2092
+                        properties:
+                          namespaceSelectors:
+                            description: |-
+                              NamespaceSelectors is the list of namespace selectors to which this ACL applies.
+                              Items in this list are evaluated using a logical OR operation.
+                            items:
+                              description: |-
+                                NamespaceSelector selects the namespaces to which this ACL applies.
+                                An empty map of MatchLabels matches all namespaces in a cluster.
+                              properties:
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    MatchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                            type: array
+                        required:
+                        - namespaceSelectors
+                        type: object
+                      certSecretRef:
+                        description: |-
+                          CertSecretRef can be given the name of a Secret containing
+                          either or both of
+
+                          - a PEM-encoded client certificate (`tls.crt`) and private
+                          key (`tls.key`);
+                          - a PEM-encoded CA certificate (`ca.crt`)
+
+                          and whichever are supplied, will be used for connecting to the
+                          registry. The client cert and key are useful if you are
+                          authenticating with a certificate; the CA cert is useful if
+                          you are using a self-signed server certificate. The Secret must
+                          be of type `Opaque` or `kubernetes.io/tls`.
+
+                          It takes precedence over the values specified in the Secret referred
+                          to by `.spec.secretRef`.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      insecure:
+                        description: |-
+                          Insecure allows connecting to a non-TLS HTTP container registry.
+                          This field is only taken into account if the .spec.type field is set to 'oci'.
+                        type: boolean
+                      interval:
+                        description: |-
+                          Interval at which the HelmRepository URL is checked for updates.
+                          This interval is approximate and may be subject to jitter to ensure
+                          efficient use of resources.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                      passCredentials:
+                        description: |-
+                          PassCredentials allows the credentials from the SecretRef to be passed
+                          on to a host that does not match the host as defined in URL.
+                          This may be required if the host of the advertised chart URLs in the
+                          index differ from the defined URL.
+                          Enabling this should be done with caution, as it can potentially result
+                          in credentials getting stolen in a MITM-attack.
+                        type: boolean
+                      provider:
+                        default: generic
+                        description: |-
+                          Provider used for authentication, can be 'aws', 'azure', 'gcp' or 'generic'.
+                          This field is optional, and only taken into account if the .spec.type field is set to 'oci'.
+                          When not specified, defaults to 'generic'.
+                        enum:
+                        - generic
+                        - aws
+                        - azure
+                        - gcp
+                        type: string
+                      secretRef:
+                        description: |-
+                          SecretRef specifies the Secret containing authentication credentials
+                          for the HelmRepository.
+                          For HTTP/S basic auth the secret must contain 'username' and 'password'
+                          fields.
+                          Support for TLS auth using the 'certFile' and 'keyFile', and/or 'caFile'
+                          keys is deprecated. Please use `.spec.certSecretRef` instead.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      suspend:
+                        description: |-
+                          Suspend tells the controller to suspend the reconciliation of this
+                          HelmRepository.
+                        type: boolean
+                      timeout:
+                        description: |-
+                          Timeout is used for the index fetch operation for an HTTPS helm repository,
+                          and for remote OCI Repository operations like pulling for an OCI helm
+                          chart by the associated HelmChart.
+                          Its default value is 60s.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m))+$
+                        type: string
+                      type:
+                        description: |-
+                          Type of the HelmRepository.
+                          When this field is set to  "oci", the URL field value must be prefixed with "oci://".
+                        enum:
+                        - default
+                        - oci
+                        type: string
+                      url:
+                        description: |-
+                          URL of the Helm repository, a valid URL contains at least a protocol and
+                          host.
+                        pattern: ^(http|https|oci)://.*$
+                        type: string
+                    required:
+                    - url
+                    type: object
+                  oci:
+                    description: OCIRepositorySpec defines the desired state of OCIRepository
+                    properties:
+                      certSecretRef:
+                        description: |-
+                          CertSecretRef can be given the name of a Secret containing
+                          either or both of
+
+                          - a PEM-encoded client certificate (`tls.crt`) and private
+                          key (`tls.key`);
+                          - a PEM-encoded CA certificate (`ca.crt`)
+
+                          and whichever are supplied, will be used for connecting to the
+                          registry. The client cert and key are useful if you are
+                          authenticating with a certificate; the CA cert is useful if
+                          you are using a self-signed server certificate. The Secret must
+                          be of type `Opaque` or `kubernetes.io/tls`.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      ignore:
+                        description: |-
+                          Ignore overrides the set of excluded patterns in the .sourceignore format
+                          (which is the same as .gitignore). If not provided, a default will be used,
+                          consult the documentation for your version to find out what those are.
+                        type: string
+                      insecure:
+                        description: Insecure allows connecting to a non-TLS HTTP
+                          container registry.
+                        type: boolean
+                      interval:
+                        description: |-
+                          Interval at which the OCIRepository URL is checked for updates.
+                          This interval is approximate and may be subject to jitter to ensure
+                          efficient use of resources.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                      layerSelector:
+                        description: |-
+                          LayerSelector specifies which layer should be extracted from the OCI artifact.
+                          When not specified, the first layer found in the artifact is selected.
+                        properties:
+                          mediaType:
+                            description: |-
+                              MediaType specifies the OCI media type of the layer
+                              which should be extracted from the OCI Artifact. The
+                              first layer matching this type is selected.
+                            type: string
+                          operation:
+                            description: |-
+                              Operation specifies how the selected layer should be processed.
+                              By default, the layer compressed content is extracted to storage.
+                              When the operation is set to 'copy', the layer compressed content
+                              is persisted to storage as it is.
+                            enum:
+                            - extract
+                            - copy
+                            type: string
+                        type: object
+                      provider:
+                        default: generic
+                        description: |-
+                          The provider used for authentication, can be 'aws', 'azure', 'gcp' or 'generic'.
+                          When not specified, defaults to 'generic'.
+                        enum:
+                        - generic
+                        - aws
+                        - azure
+                        - gcp
+                        type: string
+                      proxySecretRef:
+                        description: |-
+                          ProxySecretRef specifies the Secret containing the proxy configuration
+                          to use while communicating with the container registry.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      ref:
+                        description: |-
+                          The OCI reference to pull and monitor for changes,
+                          defaults to the latest tag.
+                        properties:
+                          digest:
+                            description: |-
+                              Digest is the image digest to pull, takes precedence over SemVer.
+                              The value should be in the format 'sha256:<HASH>'.
+                            type: string
+                          semver:
+                            description: |-
+                              SemVer is the range of tags to pull selecting the latest within
+                              the range, takes precedence over Tag.
+                            type: string
+                          semverFilter:
+                            description: SemverFilter is a regex pattern to filter
+                              the tags within the SemVer range.
+                            type: string
+                          tag:
+                            description: Tag is the image tag to pull, defaults to
+                              latest.
+                            type: string
+                        type: object
+                      secretRef:
+                        description: |-
+                          SecretRef contains the secret name containing the registry login
+                          credentials to resolve image metadata.
+                          The secret must be of type kubernetes.io/dockerconfigjson.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      serviceAccountName:
+                        description: |-
+                          ServiceAccountName is the name of the Kubernetes ServiceAccount used to authenticate
+                          the image pull if the service account has attached pull secrets. For more information:
+                          https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#add-imagepullsecrets-to-a-service-account
+                        type: string
+                      suspend:
+                        description: This flag tells the controller to suspend the
+                          reconciliation of this source.
+                        type: boolean
+                      timeout:
+                        default: 60s
+                        description: The timeout for remote OCI Repository operations
+                          like pulling, defaults to 60s.
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m))+$
+                        type: string
+                      url:
+                        description: |-
+                          URL is a reference to an OCI artifact repository hosted
+                          on a remote container registry.
+                        pattern: ^oci://.*$
+                        type: string
+                      verify:
+                        description: |-
+                          Verify contains the secret name containing the trusted public keys
+                          used to verify the signature and specifies which provider to use to check
+                          whether OCI image is authentic.
+                        properties:
+                          matchOIDCIdentity:
+                            description: |-
+                              MatchOIDCIdentity specifies the identity matching criteria to use
+                              while verifying an OCI artifact which was signed using Cosign keyless
+                              signing. The artifact's identity is deemed to be verified if any of the
+                              specified matchers match against the identity.
+                            items:
+                              description: |-
+                                OIDCIdentityMatch specifies options for verifying the certificate identity,
+                                i.e. the issuer and the subject of the certificate.
+                              properties:
+                                issuer:
+                                  description: |-
+                                    Issuer specifies the regex pattern to match against to verify
+                                    the OIDC issuer in the Fulcio certificate. The pattern must be a
+                                    valid Go regular expression.
+                                  type: string
+                                subject:
+                                  description: |-
+                                    Subject specifies the regex pattern to match against to verify
+                                    the identity subject in the Fulcio certificate. The pattern must
+                                    be a valid Go regular expression.
+                                  type: string
+                              required:
+                              - issuer
+                              - subject
+                              type: object
+                            type: array
+                          provider:
+                            default: cosign
+                            description: Provider specifies the technology used to
+                              sign the OCI Artifact.
+                            enum:
+                            - cosign
+                            - notation
+                            type: string
+                          secretRef:
+                            description: |-
+                              SecretRef specifies the Kubernetes Secret containing the
+                              trusted public keys.
+                            properties:
+                              name:
+                                description: Name of the referent.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        required:
+                        - provider
+                        type: object
+                    required:
+                    - interval
+                    - url
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: Exactly one of 'helm', 'git', or 'oci' must be set
+                  rule: size(self.filter(property, (property != "copyAuthSecret")
+                    && (size(self[property]) > 0))) == 1
+              selector:
+                description: |-
+                  Selector is a label selector.
+                  If not nil, only Clusters that match the selector will be reconciled by the controller.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - externalDNSSource
+            type: object
+        type: object
+    served: true
+    storage: true
