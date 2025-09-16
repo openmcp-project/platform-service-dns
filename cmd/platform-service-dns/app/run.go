@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/openmcp-project/controller-utils/pkg/logging"
+
+	providerscheme "github.com/openmcp-project/platform-service-dns/api/install"
 )
 
 var setupLog logging.Logger
@@ -184,10 +186,9 @@ func (o *RunOptions) Complete(ctx context.Context) error {
 }
 
 func (o *RunOptions) Run(ctx context.Context) error {
-	// TODO: CRDs required?
-	// if err := o.PlatformCluster.InitializeClient(providerscheme.InstallProviderAPIs(runtime.NewScheme())); err != nil {
-	// 	return err
-	// }
+	if err := o.PlatformCluster.InitializeClient(providerscheme.InstallOperatorAPIsPlatform(runtime.NewScheme())); err != nil {
+		return err
+	}
 
 	setupLog = o.Log.WithName("setup")
 	setupLog.Info("Environment", "value", o.Environment)

@@ -3,8 +3,8 @@ package v1alpha1
 import (
 	"slices"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	fluxv1 "github.com/fluxcd/source-controller/api/v1"
 
@@ -20,6 +20,12 @@ type DNSServiceConfigSpec struct {
 
 	// ExternalDNSSource is the source of the external-dns helm chart.
 	ExternalDNSSource ExternalDNSSource `json:"externalDNSSource"`
+
+	// HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+	// The value can be overwritten for specific purposes using ExternalDNSForPurposes.
+	// If not set, a default of 1h is used.
+	// +optional
+	HelmReleaseReconciliationInterval *metav1.Duration `json:"helmReleaseReconciliationInterval,omitempty"`
 
 	// ExternalDNSForPurposes is a list of DNS configurations in combination with purpose selectors.
 	// The first matching purpose selector will be applied to the Cluster.
@@ -52,13 +58,20 @@ type ExternalDNSPurposeConfig struct {
 	// It can be set to more easily identify the configuration in logs and events.
 	// +optional
 	Name string `json:"name,omitempty"`
+
 	// PurposeSelector is a selector to match against the list of purposes of a Cluster.
 	// If not set, all Clusters are matched.
 	// +optional
 	PurposeSelector *PurposeSelector `json:"purposeSelector,omitempty"`
+
+	// HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+	// If not set, the global HelmReleaseReconciliationInterval is used.
+	// +optional
+	HelmReleaseReconciliationInterval *metav1.Duration `json:"helmReleaseReconciliationInterval,omitempty"`
+
 	// HelmValues are the helm values to deploy external-dns with, if the purpose selector matches.
 	// +kubebuilder:validation:Schemaless
-	HelmValues runtime.RawExtension `json:"config"`
+	HelmValues *apiextensionsv1.JSON `json:"helmValues"`
 }
 
 // PurposeSelector is a selector to match against the list of purposes of a Cluster.

@@ -53,7 +53,12 @@ spec:
                   description: ExternalDNSPurposeConfig holds a purpose selector and
                     the DNS configuration to apply if the selector matches.
                   properties:
-                    config:
+                    helmReleaseReconciliationInterval:
+                      description: |-
+                        HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+                        If not set, the global HelmReleaseReconciliationInterval is used.
+                      type: string
+                    helmValues:
                       description: HelmValues are the helm values to deploy external-dns
                         with, if the purpose selector matches.
                     name:
@@ -82,7 +87,7 @@ spec:
                         rule: size(self.filter(property, size(self[property]) > 0))
                           == 1
                   required:
-                  - config
+                  - helmValues
                   type: object
                 type: array
               externalDNSSource:
@@ -653,6 +658,12 @@ spec:
                 - message: Exactly one of 'helm', 'git', or 'oci' must be set
                   rule: size(self.filter(property, (property != "copyAuthSecret")
                     && (size(self[property]) > 0))) == 1
+              helmReleaseReconciliationInterval:
+                description: |-
+                  HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+                  The value can be overwritten for specific purposes using ExternalDNSForPurposes.
+                  If not set, a default of 1h is used.
+                type: string
               selector:
                 description: |-
                   Selector is a label selector.
