@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,6 +39,7 @@ import (
 )
 
 const ControllerName = "DNSCluster"
+const defaultRequeueAfterDuration = 30 * time.Second
 
 type ClusterReconciler struct {
 	PlatformCluster   *clusters.Cluster
@@ -71,33 +74,40 @@ type ReconcileResult struct {
 	SourceKind string
 	// AccessRequest is the AccessRequest that provides access to the Cluster, if access was successfully obtained.
 	AccessRequest *clustersv1alpha1.AccessRequest
+	// Message is an optional message to be printed in the generated event.
+	Message string
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := logging.FromContextOrPanic(ctx).WithName(ControllerName)
 	ctx = logging.NewContext(ctx, log)
 	log.Info("Starting reconcile")
-	rr := r.reconcile(ctx, req)
-
-	// no status update, because the Cluster resource doesn't have status fields for DNS configuration
-	// instead, output events for significant changes
-	// TODO
-
-	return rr.Result, rr.ReconcileError
-}
-
-func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request) ReconcileResult {
-	log := logging.FromContextOrPanic(ctx)
 
 	// get Cluster resource
 	c := &clustersv1alpha1.Cluster{}
 	if err := r.PlatformCluster.Client().Get(ctx, req.NamespacedName, c); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Resource not found")
-			return ReconcileResult{}
+			return reconcile.Result{}, nil
 		}
-		return ReconcileResult{ReconcileError: errutils.WithReason(fmt.Errorf("unable to get resource '%s' from cluster: %w", req.String(), err), clusterconst.ReasonPlatformClusterInteractionProblem)}
+		return reconcile.Result{}, fmt.Errorf("unable to get resource '%s' from cluster: %w", req.String(), err)
 	}
+
+	rr := r.reconcile(ctx, c)
+
+	// no status update, because the Cluster resource doesn't have status fields for DNS configuration
+	// instead, output events for significant changes and errors
+	if rr.ReconcileError != nil {
+		r.eventRecorder.Event(c, corev1.EventTypeWarning, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+	} else if rr.Message != "" {
+		r.eventRecorder.Event(c, corev1.EventTypeNormal, "Reconciled", rr.Message)
+	}
+
+	return log.LogRequeue(rr.Result), rr.ReconcileError
+}
+
+func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.Cluster) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
 
 	// handle operation annotation
 	if c.GetAnnotations() != nil {
@@ -126,7 +136,21 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request
 		openmcpconst.ManagedPurposeLabel: c.Name,
 	}
 
-	if c.DeletionTimestamp.IsZero() {
+	// iterate over configurations with purpose selectors and choose the first matching one
+	for i, cfg := range r.Config.Spec.ExternalDNSForPurposes {
+		if cfg.PurposeSelector == nil || cfg.PurposeSelector.Matches(c.Spec.Purposes) {
+			log.Info("Found configuration with matching purpose selector", "configName", cfg.Name, "configIndex", i)
+			rr.Config = &r.Config.Spec.ExternalDNSForPurposes[i]
+			rr.ConfigIndex = i
+			break
+		}
+	}
+	if rr.Config == nil {
+		log.Info("No configuration with matching purpose selector found")
+		rr.ConfigIndex = -1
+	}
+
+	if c.DeletionTimestamp.IsZero() && rr.Config != nil {
 		// CREATE/UPDATE
 		log.Info("Creating or updating DNS configuration for Cluster")
 
@@ -140,27 +164,9 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request
 			}
 		}
 
-		// iterate over configurations with purpose selectors and choose the first matching one
-		for i, cfg := range r.Config.Spec.ExternalDNSForPurposes {
-			if cfg.PurposeSelector == nil || cfg.PurposeSelector.Matches(c.Spec.Purposes) {
-				log.Info("Found configuration with matching purpose selector", "configName", cfg.Name, "configIndex", i)
-				rr.Config = &r.Config.Spec.ExternalDNSForPurposes[i]
-				rr.ConfigIndex = i
-				break
-			}
-		}
-		if rr.Config == nil {
-			log.Info("No configuration with matching purpose selector found")
-			rr.ConfigIndex = -1
-			return rr
-		}
-
 		// get access to the Cluster
 		accessMgr := accesslib.NewClusterAccessManager(r.PlatformCluster.Client(), strings.ToLower(ControllerName), c.Namespace)
-		localName := c.Name
-		if len(ControllerName+"--"+localName) > 63 {
-			localName = ctrlutils.K8sNameUUIDUnsafe(c.Name)
-		}
+		localName := ctrlutils.ShortenToXCharactersUnsafe(c.Name, ctrlutils.K8sMaxNameLength-len(ControllerName)-2) // TODO: the StableRequestNameFromLocalName function should do this internally
 		_, ar, err := accessMgr.WaitForClusterAccess(ctx, localName, nil, &commonapi.ObjectReference{
 			Name:      c.Name,
 			Namespace: c.Namespace,
@@ -188,28 +194,57 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request
 		}
 
 		rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil {
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 			return rr
 		}
 
 		rr = r.deployHelmChartSource(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil {
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 			return rr
 		}
 
 		rr = r.deployHelmRelease(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil {
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 			return rr
 		}
 
-		// TODO: wait for HelmRelease to be ready?
+		rr.Message = "Successfully triggered deployment of external-dns on Cluster"
 	} else {
 		// DELETE
-		log.Info("Cluster marked for deletion, cleaning up DNS configuration")
+		// check if the Cluster has a finalizer, otherwise we don't have to do anything
+		if !slices.Contains(c.Finalizers, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
+			log.Debug("Cluster does not have finalizer, no cleanup required", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
+			return rr
+		}
 
-		// TODO: clean up deployed resources by removing Flux resources with matching labels
+		log.Info("Cleaning up DNS configuration for Cluster, either because it is being deleted or no configuration matches anymore")
 
-		// TODO: clean up copied auth secret if it was copied
+		rr = r.undeployHelmRelease(ctx, c, expectedLabels, rr)
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+			return rr
+		}
+
+		rr = r.undeployHelmChartSource(ctx, c, expectedLabels, rr)
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+			return rr
+		}
+
+		rr = r.undeployAuthSecret(ctx, c, expectedLabels, rr)
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+			return rr
+		}
+
+		// delete AccessRequest
+		ar := &clustersv1alpha1.AccessRequest{}
+		localName := ctrlutils.ShortenToXCharactersUnsafe(c.Name, ctrlutils.K8sMaxNameLength-len(ControllerName)-2) // TODO: the StableRequestNameFromLocalName function should do this internally
+		ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), localName)
+		ar.Namespace = c.Namespace
+		if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
+			if !apierrors.IsNotFound(err) {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr
+			}
+		}
 
 		// remove finalizer from Cluster
 		old := c.DeepCopy()
@@ -220,6 +255,8 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, req reconcile.Request
 				return rr
 			}
 		}
+
+		rr.Message = "Successfully removed external-dns from Cluster"
 	}
 
 	return rr
@@ -277,6 +314,8 @@ func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1a
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s': %w", target.Namespace, target.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 			return rr
 		}
+
+		rr.Message = "Successfully copied auth secret into Cluster namespace."
 	}
 
 	return rr
@@ -391,6 +430,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 		}
 	}
 
+	rr.Message = fmt.Sprintf("Successfully created or updated helm chart source (%s).", rr.SourceKind)
 	return rr
 }
 
@@ -460,6 +500,136 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		return rr
 	}
 
+	rr.Message = "Successfully created or updated HelmRelease to install external-dns."
+	return rr
+}
+
+// undeployHelmRelease deletes the HelmRelease.
+// It requeues the Cluster until the HelmRelease is fully deleted.
+func (r *ClusterReconciler) undeployHelmRelease(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+
+	hr := &fluxhelmv2.HelmRelease{}
+	hr.Name = clusterBasedResourceName(c.Name)
+	hr.Namespace = c.Namespace
+
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(hr), hr); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("HelmRelease not found, nothing to do", "resourceName", hr.Name, "resourceNamespace", hr.Namespace)
+			return rr
+		} else {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting HelmRelease '%s/%s': %w", hr.Namespace, hr.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+	}
+
+	// check if HelmRelease is marked for deletion
+	if !hr.DeletionTimestamp.IsZero() {
+		log.Info("HelmRelease already marked for deletion, waiting for its removal", "resourceName", hr.Name, "resourceNamespace", hr.Namespace)
+	} else {
+		// verify that the HelmRelease is managed by us
+		for k, v := range expectedLabels {
+			if v2, ok := hr.Labels[k]; !ok || v2 != v {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("HelmRelease '%s/%s' exists but is missing expected label (label '%s', expected to have value '%s', actually has '%s')", hr.Namespace, hr.Name, k, v, v2), clusterconst.ReasonInternalError)
+				return rr
+			}
+		}
+
+		// delete HelmRelease
+		log.Info("Deleting HelmRelease", "resourceName", hr.Name, "resourceNamespace", hr.Namespace)
+		if err := r.PlatformCluster.Client().Delete(ctx, hr); err != nil {
+			if !apierrors.IsNotFound(err) {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting HelmRelease '%s/%s': %w", hr.Namespace, hr.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr
+			}
+		}
+	}
+
+	// requeue to verify deletion
+	rr.Message = "Waiting for HelmRelease to be deleted."
+	rr.Result.RequeueAfter = defaultRequeueAfterDuration
+	return rr
+}
+
+// undeployHelmChartSource deletes all Flux sources where the labels indicate they were created by this controller for the given Cluster.
+// It does not wait for their deletion.
+func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+
+	// list existing Flux sources to detect obsolete ones
+	existingHelm := &fluxsourcev1.HelmRepositoryList{}
+	if err := r.PlatformCluster.Client().List(ctx, existingHelm, client.InNamespace(c.Namespace), client.MatchingLabels(expectedLabels)); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing HelmRepository resources in target namespace '%s': %w", c.Namespace, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	existingGit := &fluxsourcev1.GitRepositoryList{}
+	if err := r.PlatformCluster.Client().List(ctx, existingGit, client.InNamespace(c.Namespace), client.MatchingLabels(expectedLabels)); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing GitRepository resources in target namespace '%s': %w", c.Namespace, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	existingOCI := &fluxsourcev1.OCIRepositoryList{}
+	if err := r.PlatformCluster.Client().List(ctx, existingOCI, client.InNamespace(c.Namespace), client.MatchingLabels(expectedLabels)); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing OCIRepository resources in target namespace '%s': %w", c.Namespace, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	toBeDeleted := []client.Object{}
+	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingHelm.Items, func(obj fluxsourcev1.HelmRepository) client.Object {
+		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "HelmRepository"})
+		}
+		return &obj
+	})...)
+	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingGit.Items, func(obj fluxsourcev1.GitRepository) client.Object {
+		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "GitRepository"})
+		}
+		return &obj
+	})...)
+	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingOCI.Items, func(obj fluxsourcev1.OCIRepository) client.Object {
+		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "OCIRepository"})
+		}
+		return &obj
+	})...)
+
+	for _, obj := range toBeDeleted {
+		log.Info("Deleting Flux source", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
+		if err := r.PlatformCluster.Client().Delete(ctx, obj); err != nil {
+			if !apierrors.IsNotFound(err) {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting %s '%s/%s': %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName(), err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr
+			}
+		}
+	}
+
+	rr.Message = "Deleted all helm chart sources for Cluster."
+	return rr
+}
+
+// undeployAuthSecret removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
+// It does not wait for their deletion.
+func (r *ClusterReconciler) undeployAuthSecret(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+
+	// list existing secrets to detect obsolete ones
+	existingSecrets := &corev1.SecretList{}
+	if err := r.PlatformCluster.Client().List(ctx, existingSecrets, client.InNamespace(c.Namespace), client.MatchingLabels(expectedLabels)); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing Secret resources in target namespace '%s': %w", c.Namespace, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+
+	for i := range existingSecrets.Items {
+		obj := &existingSecrets.Items[i]
+		log.Info("Deleting auth secret", "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
+		if err := r.PlatformCluster.Client().Delete(ctx, obj); err != nil {
+			if !apierrors.IsNotFound(err) {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting Secret '%s/%s': %w", obj.GetNamespace(), obj.GetName(), err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr
+			}
+		}
+	}
+
+	rr.Message = "Deleted all auth secrets for Cluster."
 	return rr
 }
 
