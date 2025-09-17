@@ -14,8 +14,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	fluxhelmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -43,19 +45,17 @@ const defaultRequeueAfterDuration = 30 * time.Second
 
 type ClusterReconciler struct {
 	PlatformCluster   *clusters.Cluster
-	Config            *dnsv1alpha1.DNSServiceConfig
 	eventRecorder     record.EventRecorder
 	ProviderName      string
 	ProviderNamespace string
 }
 
-func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, cfg *dnsv1alpha1.DNSServiceConfig, providerName, providerNamespace string) *ClusterReconciler {
+func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace string) *ClusterReconciler {
 	return &ClusterReconciler{
 		PlatformCluster:   platformCluster,
 		eventRecorder:     recorder,
 		ProviderName:      providerName,
 		ProviderNamespace: providerNamespace,
-		Config:            cfg,
 	}
 }
 
@@ -76,6 +76,8 @@ type ReconcileResult struct {
 	AccessRequest *clustersv1alpha1.AccessRequest
 	// Message is an optional message to be printed in the generated event.
 	Message string
+	// ProviderConfig is the complete provider configuration.
+	ProviderConfig *dnsv1alpha1.DNSServiceConfig
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -136,11 +138,24 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		openmcpconst.ManagedPurposeLabel: c.Name,
 	}
 
+	// load DNSServiceConfig resource
+	rr.ProviderConfig = &dnsv1alpha1.DNSServiceConfig{}
+	rr.ProviderConfig.Name = r.ProviderName
+	rr.ProviderConfig.Namespace = r.ProviderNamespace
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(rr.ProviderConfig), rr.ProviderConfig); err != nil {
+		if apierrors.IsNotFound(err) {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("DNSServiceConfig '%s/%s' not found", rr.ProviderConfig.Namespace, rr.ProviderConfig.Name), clusterconst.ReasonConfigurationProblem)
+		} else {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting DNSServiceConfig '%s/%s': %w", rr.ProviderConfig.Namespace, rr.ProviderConfig.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		}
+		return rr
+	}
+
 	// iterate over configurations with purpose selectors and choose the first matching one
-	for i, cfg := range r.Config.Spec.ExternalDNSForPurposes {
+	for i, cfg := range rr.ProviderConfig.Spec.ExternalDNSForPurposes {
 		if cfg.PurposeSelector == nil || cfg.PurposeSelector.Matches(c.Spec.Purposes) {
 			log.Info("Found configuration with matching purpose selector", "configName", cfg.Name, "configIndex", i)
-			rr.Config = &r.Config.Spec.ExternalDNSForPurposes[i]
+			rr.Config = &rr.ProviderConfig.Spec.ExternalDNSForPurposes[i]
 			rr.ConfigIndex = i
 			break
 		}
@@ -267,9 +282,9 @@ func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1a
 	log := logging.FromContextOrPanic(ctx)
 
 	// copy secret if configured
-	if r.Config.Spec.ExternalDNSSource.CopyAuthSecret != nil {
+	if rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret != nil {
 		source := &corev1.Secret{}
-		source.Name = r.Config.Spec.ExternalDNSSource.CopyAuthSecret.Source.Name
+		source.Name = rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Source.Name
 		source.Namespace = r.ProviderNamespace
 		log.Debug("Auth secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name)
 		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(source), source); err != nil {
@@ -280,8 +295,8 @@ func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1a
 		// check if target secret already exists
 		target := &corev1.Secret{}
 		target.Name = source.Name
-		if r.Config.Spec.ExternalDNSSource.CopyAuthSecret.Target != nil && r.Config.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name != "" {
-			target.Name = r.Config.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name
+		if rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target != nil && rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name != "" {
+			target.Name = rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name
 		}
 		target.Namespace = c.Namespace
 		targetExists := true
@@ -348,14 +363,14 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 	}
 	toBeDeleted := []client.Object{}
 	// determine which type of source to create and which existing sources to delete
-	if r.Config.Spec.ExternalDNSSource.Helm != nil {
+	if rr.ProviderConfig.Spec.ExternalDNSSource.Helm != nil {
 		fluxSource = &fluxsourcev1.HelmRepository{}
 		setSpec = func(obj client.Object) error {
 			helmRepo, ok := obj.(*fluxsourcev1.HelmRepository)
 			if !ok {
 				return fmt.Errorf("expected HelmRepository object, got %T", obj)
 			}
-			helmRepo.Spec = *r.Config.Spec.ExternalDNSSource.Helm.DeepCopy()
+			helmRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Helm.DeepCopy()
 			return nil
 		}
 		rr.SourceKind = "HelmRepository"
@@ -367,14 +382,14 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 		}
 		toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingGit.Items, func(obj fluxsourcev1.GitRepository) client.Object { return &obj })...)
 		toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingOCI.Items, func(obj fluxsourcev1.OCIRepository) client.Object { return &obj })...)
-	} else if r.Config.Spec.ExternalDNSSource.Git != nil {
+	} else if rr.ProviderConfig.Spec.ExternalDNSSource.Git != nil {
 		fluxSource = &fluxsourcev1.GitRepository{}
 		setSpec = func(obj client.Object) error {
 			gitRepo, ok := obj.(*fluxsourcev1.GitRepository)
 			if !ok {
 				return fmt.Errorf("expected GitRepository object, got %T", obj)
 			}
-			gitRepo.Spec = *r.Config.Spec.ExternalDNSSource.Git.DeepCopy()
+			gitRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Git.DeepCopy()
 			return nil
 		}
 		rr.SourceKind = "GitRepository"
@@ -386,14 +401,14 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 		}
 		toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingHelm.Items, func(obj fluxsourcev1.HelmRepository) client.Object { return &obj })...)
 		toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingOCI.Items, func(obj fluxsourcev1.OCIRepository) client.Object { return &obj })...)
-	} else if r.Config.Spec.ExternalDNSSource.OCI != nil {
+	} else if rr.ProviderConfig.Spec.ExternalDNSSource.OCI != nil {
 		fluxSource = &fluxsourcev1.OCIRepository{}
 		setSpec = func(obj client.Object) error {
 			ociRepo, ok := obj.(*fluxsourcev1.OCIRepository)
 			if !ok {
 				return fmt.Errorf("expected OCIRepository object, got %T", obj)
 			}
-			ociRepo.Spec = *r.Config.Spec.ExternalDNSSource.OCI.DeepCopy()
+			ociRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.OCI.DeepCopy()
 			return nil
 		}
 		rr.SourceKind = "OCIRepository"
@@ -489,8 +504,8 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		// deploy interval
 		if rr.Config.HelmReleaseReconciliationInterval != nil {
 			hr.Spec.Interval = *rr.Config.HelmReleaseReconciliationInterval
-		} else if r.Config.Spec.HelmReleaseReconciliationInterval != nil {
-			hr.Spec.Interval = *r.Config.Spec.HelmReleaseReconciliationInterval
+		} else if rr.ProviderConfig.Spec.HelmReleaseReconciliationInterval != nil {
+			hr.Spec.Interval = *rr.ProviderConfig.Spec.HelmReleaseReconciliationInterval
 		} else {
 			hr.Spec.Interval = metav1.Duration{Duration: 1 * time.Hour}
 		}
@@ -639,4 +654,23 @@ func (r *ClusterReconciler) undeployAuthSecret(ctx context.Context, c *clustersv
 func clusterBasedResourceName(clusterName string) string {
 	suffix := ".external-dns"
 	return ctrlutils.ShortenToXCharactersUnsafe(clusterName, ctrlutils.K8sMaxNameLength-len(suffix)) + suffix
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		// watch Cluster resources
+		For(&clustersv1alpha1.Cluster{}).
+		WithEventFilter(predicate.And(
+			predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				ctrlutils.DeletionTimestampChangedPredicate{},
+				ctrlutils.GotAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+				ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+			),
+			predicate.Not(
+				ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+			),
+		)).
+		Complete(r)
 }

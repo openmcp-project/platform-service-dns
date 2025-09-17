@@ -10,6 +10,7 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
+	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 )
 
 func NewPlatformServiceDNSCommand() *cobra.Command {
@@ -32,8 +33,9 @@ func NewPlatformServiceDNSCommand() *cobra.Command {
 }
 
 type RawSharedOptions struct {
-	Environment string `json:"environment"`
-	DryRun      bool   `json:"dry-run"`
+	Environment  string `json:"environment"`
+	ProviderName string `json:"provider-name"`
+	DryRun       bool   `json:"dry-run"`
 }
 
 type SharedOptions struct {
@@ -41,8 +43,8 @@ type SharedOptions struct {
 	PlatformCluster *clusters.Cluster
 
 	// fields filled in Complete()
-	Log          logging.Logger
-	ProviderName string
+	Log               logging.Logger
+	ProviderNamespace string
 }
 
 func (o *SharedOptions) AddPersistentFlags(cmd *cobra.Command) {
@@ -52,6 +54,8 @@ func (o *SharedOptions) AddPersistentFlags(cmd *cobra.Command) {
 	o.PlatformCluster.RegisterSingleConfigPathFlag(cmd.PersistentFlags())
 	// environment
 	cmd.PersistentFlags().StringVar(&o.Environment, "environment", "", "Environment name. Required. This is used to distinguish between different environments that are watching the same Onboarding cluster. Must be globally unique.")
+	// provider name
+	cmd.PersistentFlags().StringVar(&o.ProviderName, "provider-name", "", "Name of the provider resource.")
 	cmd.PersistentFlags().BoolVar(&o.DryRun, "dry-run", false, "If set, the command aborts after evaluation of the given flags.")
 }
 
@@ -59,10 +63,12 @@ func (o *SharedOptions) Complete() error {
 	if o.Environment == "" {
 		return fmt.Errorf("environment must not be empty")
 	}
-
-	o.ProviderName = os.Getenv("OPENMCP_PROVIDER_NAME")
 	if o.ProviderName == "" {
-		o.ProviderName = "gardener"
+		return fmt.Errorf("provider-name must not be empty")
+	}
+	o.ProviderNamespace = os.Getenv(openmcpconst.EnvVariablePodNamespace)
+	if o.ProviderNamespace == "" {
+		return fmt.Errorf("environment variable '%s' must be set", openmcpconst.EnvVariablePodNamespace)
 	}
 
 	// build logger

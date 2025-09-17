@@ -19,6 +19,7 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/logging"
 
 	providerscheme "github.com/openmcp-project/platform-service-dns/api/install"
+	"github.com/openmcp-project/platform-service-dns/internal/controllers/cluster"
 )
 
 var setupLog logging.Logger
@@ -199,7 +200,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	})
 
 	mgr, err := ctrl.NewManager(o.PlatformCluster.RESTConfig(), ctrl.Options{
-		Scheme:                 runtime.NewScheme(), // TODO add scheme, e.g. providerscheme.InstallProviderAPIs(runtime.NewScheme()),
+		Scheme:                 o.PlatformCluster.Scheme(),
 		Metrics:                o.MetricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: o.ProbeAddr,
@@ -222,7 +223,9 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		return fmt.Errorf("unable to create manager: %w", err)
 	}
 
-	// TODO setup controllers
+	if err := cluster.NewClusterReconciler(o.PlatformCluster, mgr.GetEventRecorderFor(cluster.ControllerName), o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add Cluster reconciler to manager: %w", err)
+	}
 
 	if o.MetricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
