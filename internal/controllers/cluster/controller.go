@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,10 +14,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -41,13 +45,15 @@ import (
 )
 
 const ControllerName = "DNSCluster"
-const defaultRequeueAfterDuration = 30 * time.Second
+const defaultRequeueAfterDuration = 1 * time.Minute
 
 type ClusterReconciler struct {
 	PlatformCluster   *clusters.Cluster
 	eventRecorder     record.EventRecorder
 	ProviderName      string
 	ProviderNamespace string
+	KnownClusters     map[types.NamespacedName]struct{}
+	KnownClustersLock *sync.RWMutex
 }
 
 func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace string) *ClusterReconciler {
@@ -56,6 +62,8 @@ func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.Eve
 		eventRecorder:     recorder,
 		ProviderName:      providerName,
 		ProviderNamespace: providerNamespace,
+		KnownClusters:     map[types.NamespacedName]struct{}{},
+		KnownClustersLock: &sync.RWMutex{},
 	}
 }
 
@@ -90,6 +98,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err := r.PlatformCluster.Client().Get(ctx, req.NamespacedName, c); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Resource not found")
+			r.removeKnownClusterRaw(req.Name, req.Namespace)
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("unable to get resource '%s' from cluster: %w", req.String(), err)
@@ -178,6 +187,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 				return rr
 			}
 		}
+		r.addKnownCluster(c)
 
 		// get access to the Cluster
 		accessMgr := accesslib.NewClusterAccessManager(r.PlatformCluster.Client(), strings.ToLower(ControllerName), c.Namespace)
@@ -270,6 +280,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 				return rr
 			}
 		}
+		r.removeKnownCluster(c)
 
 		rr.Message = "Successfully removed external-dns from Cluster"
 	}
@@ -656,6 +667,34 @@ func clusterBasedResourceName(clusterName string) string {
 	return ctrlutils.ShortenToXCharactersUnsafe(clusterName, ctrlutils.K8sMaxNameLength-len(suffix)) + suffix
 }
 
+func (r *ClusterReconciler) addKnownCluster(c *clustersv1alpha1.Cluster) {
+	nn := types.NamespacedName{Namespace: c.Namespace, Name: c.Name}
+	r.KnownClustersLock.Lock()
+	defer r.KnownClustersLock.Unlock()
+	r.KnownClusters[nn] = struct{}{}
+}
+
+func (r *ClusterReconciler) removeKnownCluster(c *clustersv1alpha1.Cluster) {
+	r.removeKnownClusterRaw(c.Name, c.Namespace)
+}
+
+func (r *ClusterReconciler) removeKnownClusterRaw(name, namespace string) {
+	nn := types.NamespacedName{Namespace: namespace, Name: name}
+	r.KnownClustersLock.Lock()
+	defer r.KnownClustersLock.Unlock()
+	delete(r.KnownClusters, nn)
+}
+
+func (r *ClusterReconciler) listKnownClusters() []types.NamespacedName {
+	r.KnownClustersLock.RLock()
+	defer r.KnownClustersLock.RUnlock()
+	result := make([]types.NamespacedName, 0, len(r.KnownClusters))
+	for nn := range r.KnownClusters {
+		result = append(result, nn)
+	}
+	return result
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -672,5 +711,14 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
 			),
 		)).
+		// watch DNSServiceConfig resource and reconcile all Clusters that are known to have external-dns deployed if it changes
+		Watches(&dnsv1alpha1.DNSServiceConfig{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []ctrl.Request {
+			return collections.ProjectSliceToSlice(r.listKnownClusters(), func(nn types.NamespacedName) ctrl.Request {
+				return ctrl.Request{NamespacedName: nn}
+			})
+		}), builder.WithPredicates(predicate.And(
+			predicate.GenerationChangedPredicate{},
+			ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace),
+		))).
 		Complete(r)
 }
