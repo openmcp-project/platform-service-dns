@@ -13,11 +13,6 @@ import (
 
 // DNSServiceConfigSpec defines the desired state of DNSServiceConfig
 type DNSServiceConfigSpec struct {
-	// Selector is a label selector.
-	// If not nil, only Clusters that match the selector will be reconciled by the controller.
-	// +optional
-	Selector *metav1.LabelSelector `json:"selector,omitempty"`
-
 	// ExternalDNSSource is the source of the external-dns helm chart.
 	ExternalDNSSource ExternalDNSSource `json:"externalDNSSource"`
 
