@@ -1,0 +1,33 @@
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns-service
+  namespace: test
+spec:
+  externalDNSSource:
+    oci:
+      url: "oci://example.org/repo/charts"
+      interval: 10m
+    copyAuthSecret:
+      source:
+        name: my-auth
+      target:
+        name: my-auth-copy
+  externalDNSForPurposes:
+  - name: foo
+    purposeSelector:
+      name: foo
+    helmValues: |
+      {
+        "foo": "foo"
+      }
+  - name: asdf
+    helmValues: |
+      {
+        "foo": "bar"
+      }
+  - name: qwer
+    helmValues: |
+      {
+        "foo": "baz"
+      }

@@ -1,0 +1,22 @@
+purposeSelector:
+  name: foo
+
+purposeSets:
+  a:
+  - foo
+  b:
+  - bar
+  - foo
+  c:
+  - foo
+  - foo
+  d: []
+  e:
+  - baz
+  f:
+  - foobar
+
+expected:
+- a
+- b
+- c

@@ -100,33 +100,35 @@ spec:
                       If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                     properties:
                       source:
-                        description: ObjectReference is a reference to an object in
-                          any namespace.
+                        description: LocalObjectReference is a reference to an object
+                          in the same namespace as the resource referencing it.
                         properties:
                           name:
-                            description: Name is the name of the object.
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                             type: string
-                          namespace:
-                            description: Namespace is the namespace of the object.
-                            type: string
-                        required:
-                        - name
-                        - namespace
                         type: object
+                        x-kubernetes-map-type: atomic
                       target:
-                        description: ObjectReference is a reference to an object in
-                          any namespace.
+                        description: LocalObjectReference is a reference to an object
+                          in the same namespace as the resource referencing it.
                         properties:
                           name:
-                            description: Name is the name of the object.
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                             type: string
-                          namespace:
-                            description: Namespace is the namespace of the object.
-                            type: string
-                        required:
-                        - name
-                        - namespace
                         type: object
+                        x-kubernetes-map-type: atomic
                     required:
                     - source
                     - target

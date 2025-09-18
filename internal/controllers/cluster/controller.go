@@ -54,6 +54,7 @@ type ClusterReconciler struct {
 	ProviderNamespace string
 	KnownClusters     map[types.NamespacedName]struct{}
 	KnownClustersLock *sync.RWMutex
+	FakeClientMapping map[string]client.Client // this must be nil except for unit tests
 }
 
 func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace string) *ClusterReconciler {
@@ -108,10 +109,12 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request
 
 	// no status update, because the Cluster resource doesn't have status fields for DNS configuration
 	// instead, output events for significant changes and errors
-	if rr.ReconcileError != nil {
-		r.eventRecorder.Event(c, corev1.EventTypeWarning, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
-	} else if rr.Message != "" {
-		r.eventRecorder.Event(c, corev1.EventTypeNormal, "Reconciled", rr.Message)
+	if r.eventRecorder != nil {
+		if rr.ReconcileError != nil {
+			r.eventRecorder.Event(c, corev1.EventTypeWarning, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+		} else if rr.Message != "" {
+			r.eventRecorder.Event(c, corev1.EventTypeNormal, "Reconciled", rr.Message)
+		}
 	}
 
 	return log.LogRequeue(rr.Result), rr.ReconcileError
@@ -143,7 +146,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 
 	rr := ReconcileResult{}
 	expectedLabels := map[string]string{
-		openmcpconst.ManagedByLabel:      ControllerName,
+		openmcpconst.ManagedByLabel:      fmt.Sprintf("%s.%s", r.ProviderName, ControllerName),
 		openmcpconst.ManagedPurposeLabel: c.Name,
 	}
 
@@ -162,7 +165,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 
 	// iterate over configurations with purpose selectors and choose the first matching one
 	for i, cfg := range rr.ProviderConfig.Spec.ExternalDNSForPurposes {
-		if cfg.PurposeSelector == nil || cfg.PurposeSelector.Matches(c.Spec.Purposes) {
+		if cfg.PurposeSelector.Matches(c.Spec.Purposes) {
 			log.Info("Found configuration with matching purpose selector", "configName", cfg.Name, "configIndex", i)
 			rr.Config = &rr.ProviderConfig.Spec.ExternalDNSForPurposes[i]
 			rr.ConfigIndex = i
@@ -190,9 +193,14 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		r.addKnownCluster(c)
 
 		// get access to the Cluster
-		accessMgr := accesslib.NewClusterAccessManager(r.PlatformCluster.Client(), strings.ToLower(ControllerName), c.Namespace)
-		localName := ctrlutils.ShortenToXCharactersUnsafe(c.Name, ctrlutils.K8sMaxNameLength-len(ControllerName)-2) // TODO: the StableRequestNameFromLocalName function should do this internally
-		_, ar, err := accessMgr.WaitForClusterAccess(ctx, localName, nil, &commonapi.ObjectReference{
+		var accessMgr accesslib.Manager
+		if r.FakeClientMapping != nil {
+			log.Info("Using fake client mapping for access manager, this message should never appear outside of unit tests")
+			accessMgr = accesslib.NewTestClusterAccessManager(r.PlatformCluster.Client(), ControllerName, c.Namespace, r.FakeClientMapping)
+		} else {
+			accessMgr = accesslib.NewClusterAccessManager(r.PlatformCluster.Client(), ControllerName, c.Namespace)
+		}
+		_, ar, err := accessMgr.WaitForClusterAccess(ctx, c.Name, nil, &commonapi.ObjectReference{
 			Name:      c.Name,
 			Namespace: c.Namespace,
 		}, accesslib.ReferenceToCluster, []clustersv1alpha1.PermissionsRequest{
@@ -212,10 +220,36 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		}
 		rr.AccessRequest = ar
 
-		// inject labels into AccessRequest
-		if err := ctrlutils.EnsureLabel(ctx, r.PlatformCluster.Client(), rr.AccessRequest, openmcpconst.ManagedByLabel, ControllerName, true, ctrlutils.OVERWRITE); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error ensuring labels on AccessRequest: %w", err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		// inject labels and owner reference into AccessRequest
+		changed := false
+		arOld := ar.DeepCopy()
+		if ar.Labels == nil {
+			ar.Labels = map[string]string{}
+		}
+		for k, v := range expectedLabels {
+			if v2, ok := ar.Labels[k]; !ok || v2 != v {
+				changed = true
+				ar.Labels[k] = v
+			}
+		}
+		hasOwner, err := controllerutil.HasOwnerReference(ar.OwnerReferences, c, r.PlatformCluster.Scheme())
+		if err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error checking owner references on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonInternalError)
 			return rr
+		}
+		if !hasOwner {
+			changed = true
+			if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error setting owner reference on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonInternalError)
+				return rr
+			}
+		}
+		if changed {
+			log.Debug("Patching labels and/or owner references on AccessRequest", "labels", expectedLabels)
+			if err := r.PlatformCluster.Client().Patch(ctx, ar, client.MergeFrom(arOld)); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error patching labels and/or owner references on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr
+			}
 		}
 
 		rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
@@ -239,6 +273,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		// check if the Cluster has a finalizer, otherwise we don't have to do anything
 		if !slices.Contains(c.Finalizers, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
 			log.Debug("Cluster does not have finalizer, no cleanup required", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
+			r.removeKnownCluster(c)
 			return rr
 		}
 
@@ -261,8 +296,7 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 
 		// delete AccessRequest
 		ar := &clustersv1alpha1.AccessRequest{}
-		localName := ctrlutils.ShortenToXCharactersUnsafe(c.Name, ctrlutils.K8sMaxNameLength-len(ControllerName)-2) // TODO: the StableRequestNameFromLocalName function should do this internally
-		ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), localName)
+		ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), c.Name)
 		ar.Namespace = c.Namespace
 		if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -330,6 +364,9 @@ func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1a
 		}
 		log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name)
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), target, func() error {
+			if err := controllerutil.SetOwnerReference(c, target, r.PlatformCluster.Scheme()); err != nil {
+				return fmt.Errorf("error setting owner reference on target secret '%s/%s': %w", target.Namespace, target.Name, err)
+			}
 			target.Labels = maputils.Merge(target.Labels, source.Labels, expectedLabels)
 			target.Annotations = maputils.Merge(target.Annotations, source.Annotations)
 			target.Data = make(map[string][]byte, len(source.Data))
@@ -439,6 +476,9 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 	fluxSource.SetNamespace(c.Namespace)
 	log.Info("Creating or updating Flux source", "kind", rr.SourceKind, "sourceName", fluxSource.GetName(), "sourceNamespace", fluxSource.GetNamespace())
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), fluxSource, func() error {
+		if err := controllerutil.SetOwnerReference(c, fluxSource, r.PlatformCluster.Scheme()); err != nil {
+			return fmt.Errorf("error setting owner reference on %s '%s/%s': %w", rr.SourceKind, fluxSource.GetNamespace(), fluxSource.GetName(), err)
+		}
 		fluxSource.SetLabels(maputils.Merge(fluxSource.GetLabels(), expectedLabels))
 		return setSpec(fluxSource)
 	}); err != nil {
@@ -471,6 +511,10 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 
 	log.Info("Creating or updating HelmRelease", "resourceName", hr.Name, "resourceNamespace", hr.Namespace)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), hr, func() error {
+		// owner reference
+		if err := controllerutil.SetOwnerReference(c, hr, r.PlatformCluster.Scheme()); err != nil {
+			return fmt.Errorf("error setting owner reference on HelmRelease '%s/%s': %w", hr.Namespace, hr.Name, err)
+		}
 		// labels
 		hr.Labels = maputils.Merge(hr.Labels, expectedLabels)
 		// chart
@@ -706,9 +750,14 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				ctrlutils.DeletionTimestampChangedPredicate{},
 				ctrlutils.GotAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
 				ctrlutils.LostAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+				ctrlutils.GotAnnotationPredicate(dnsv1alpha1.OperationAnnotation, openmcpconst.OperationAnnotationValueReconcile),
+				ctrlutils.LostAnnotationPredicate(dnsv1alpha1.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
 			),
 			predicate.Not(
-				ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+				predicate.Or(
+					ctrlutils.HasAnnotationPredicate(openmcpconst.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+					ctrlutils.HasAnnotationPredicate(dnsv1alpha1.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
+				),
 			),
 		)).
 		// watch DNSServiceConfig resource and reconcile all Clusters that are known to have external-dns deployed if it changes
@@ -718,7 +767,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			})
 		}), builder.WithPredicates(predicate.And(
 			predicate.GenerationChangedPredicate{},
-			ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace),
+			// ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace), // TODO: add when available in controller-utils
 		))).
 		Complete(r)
 }

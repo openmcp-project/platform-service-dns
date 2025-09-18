@@ -43,8 +43,8 @@ type ExternalDNSSource struct {
 // SecretCopy defines the name of the secret to copy and the name of the copied secret.
 // If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
 type SecretCopy struct {
-	Source commonapi.ObjectReference  `json:"source"`
-	Target *commonapi.ObjectReference `json:"target"`
+	Source commonapi.LocalObjectReference  `json:"source"`
+	Target *commonapi.LocalObjectReference `json:"target"`
 }
 
 // ExternalDNSPurposeConfig holds a purpose selector and the DNS configuration to apply if the selector matches.
@@ -116,6 +116,9 @@ func init() {
 
 // Matches returns true if the selector matches the given list of purposes.
 func (ps *PurposeSelector) Matches(purposes []string) bool {
+	if ps == nil {
+		return true
+	}
 	return requirementMatches(&ps.PurposeSelectorRequirement, purposes, map[*PurposeSelectorRequirement]empty{})
 }
 

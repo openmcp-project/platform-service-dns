@@ -219,7 +219,7 @@ func (in *SecretCopy) DeepCopyInto(out *SecretCopy) {
 	out.Source = in.Source
 	if in.Target != nil {
 		in, out := &in.Target, &out.Target
-		*out = new(common.ObjectReference)
+		*out = new(common.LocalObjectReference)
 		**out = **in
 	}
 }
