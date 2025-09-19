@@ -20,7 +20,9 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	accesslib "github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
 
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 	"github.com/openmcp-project/platform-service-dns/api/install"
@@ -80,7 +82,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
@@ -141,7 +147,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c2 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-02", Namespace: "bar"}, c2)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c2))
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c2))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c2)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c2))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct flux resources were created
 		expectedLabels[openmcpconst.ManagedPurposeLabel] = "cluster-02"
@@ -206,7 +216,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct HelmRelease was created
 		expectedLabels := map[string]string{
@@ -223,7 +237,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c2 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-02", Namespace: "bar"}, c2)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c2))
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c2))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c2)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c2))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct HelmRelease was created
 		expectedLabels[openmcpconst.ManagedPurposeLabel] = "cluster-02"
@@ -263,7 +281,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify finalizer on Cluster
 		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(c1), c1)).To(Succeed())
@@ -353,7 +375,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// all three dummy resources should be deleted
 		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(helmSource), helmSource)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
@@ -369,7 +395,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
@@ -398,7 +428,11 @@ var _ = Describe("ClusterReconciler", func() {
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
-		env.ShouldReconcile(testutils.RequestFromObject(c1))
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
@@ -420,3 +454,24 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 })
+
+func fakeAccessRequestReadiness(env *testutils.Environment, c *clustersv1alpha1.Cluster) {
+	ar := &clustersv1alpha1.AccessRequest{}
+	ar.SetName(accesslib.StableRequestNameFromLocalName(cluster.ControllerName, c.Name))
+	ar.SetNamespace(c.Namespace)
+	Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(ar), ar)).To(Succeed())
+	old := ar.DeepCopy()
+	ar.Status.Phase = clustersv1alpha1.REQUEST_GRANTED
+	ar.Status.SecretRef = &commonapi.ObjectReference{
+		Name:      ar.Name,
+		Namespace: ar.Namespace,
+	}
+	Expect(env.Client().Status().Patch(env.Ctx, ar, client.MergeFrom(old))).To(Succeed())
+	sec := &corev1.Secret{}
+	sec.Name = ar.Status.SecretRef.Name
+	sec.Namespace = ar.Status.SecretRef.Namespace
+	sec.Data = map[string][]byte{
+		clustersv1alpha1.SecretKeyKubeconfig: []byte("fake"),
+	}
+	Expect(env.Client().Create(env.Ctx, sec)).To(Succeed())
+}

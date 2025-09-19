@@ -45,7 +45,7 @@ import (
 )
 
 const ControllerName = "DNSCluster"
-const defaultRequeueAfterDuration = 1 * time.Minute
+const defaultRequeueAfterDuration = 30 * time.Second
 
 type ClusterReconciler struct {
 	PlatformCluster   *clusters.Cluster
@@ -192,65 +192,51 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		}
 		r.addKnownCluster(c)
 
-		// get access to the Cluster
-		var accessMgr accesslib.Manager
-		if r.FakeClientMapping != nil {
-			log.Info("Using fake client mapping for access manager, this message should never appear outside of unit tests")
-			accessMgr = accesslib.NewTestClusterAccessManager(r.PlatformCluster.Client(), ControllerName, c.Namespace, r.FakeClientMapping)
-		} else {
-			accessMgr = accesslib.NewClusterAccessManager(r.PlatformCluster.Client(), ControllerName, c.Namespace)
-		}
-		_, ar, err := accessMgr.WaitForClusterAccess(ctx, c.Name, nil, &commonapi.ObjectReference{
-			Name:      c.Name,
-			Namespace: c.Namespace,
-		}, accesslib.ReferenceToCluster, []clustersv1alpha1.PermissionsRequest{
-			{
-				Rules: []rbacv1.PolicyRule{ // TODO: restrict permissions
+		log.Info("Creating or updating AccessRequest to get access to Cluster")
+		ar := &clustersv1alpha1.AccessRequest{}
+		ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
+		ar.SetNamespace(c.Namespace)
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), ar, func() error {
+			if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
+				return fmt.Errorf("error setting owner reference: %w", err)
+			}
+			ar.Labels = maputils.Merge(ar.Labels, expectedLabels)
+			ar.Spec.ClusterRef = &commonapi.ObjectReference{
+				Name:      c.Name,
+				Namespace: c.Namespace,
+			}
+			ar.Spec.Token = &clustersv1alpha1.TokenConfig{
+				Permissions: []clustersv1alpha1.PermissionsRequest{
 					{
-						APIGroups: []string{"*"},
-						Resources: []string{"*"},
-						Verbs:     []string{"*"},
+						Rules: []rbacv1.PolicyRule{ // TODO: restrict permissions
+							{
+								APIGroups: []string{"*"},
+								Resources: []string{"*"},
+								Verbs:     []string{"*"},
+							},
+						},
 					},
 				},
-			},
-		})
-		if err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting access to Cluster '%s/%s': %w", c.Namespace, c.Name, err), clusterconst.ReasonInternalError)
+			}
+			return nil
+		}); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+		if ar.Status.IsDenied() {
+			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' was denied, unable to proceed with deploying DNS configuration", ar.Namespace, ar.Name)
+			return rr
+		}
+		if !ar.Status.IsGranted() {
+			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' is not yet granted, waiting for access to be granted", ar.Namespace, ar.Name)
+			rr.Result.RequeueAfter = defaultRequeueAfterDuration
 			return rr
 		}
 		rr.AccessRequest = ar
-
-		// inject labels and owner reference into AccessRequest
-		changed := false
-		arOld := ar.DeepCopy()
-		if ar.Labels == nil {
-			ar.Labels = map[string]string{}
-		}
-		for k, v := range expectedLabels {
-			if v2, ok := ar.Labels[k]; !ok || v2 != v {
-				changed = true
-				ar.Labels[k] = v
-			}
-		}
-		hasOwner, err := controllerutil.HasOwnerReference(ar.OwnerReferences, c, r.PlatformCluster.Scheme())
-		if err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error checking owner references on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonInternalError)
-			return rr
-		}
-		if !hasOwner {
-			changed = true
-			if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error setting owner reference on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonInternalError)
-				return rr
-			}
-		}
-		if changed {
-			log.Debug("Patching labels and/or owner references on AccessRequest", "labels", expectedLabels)
-			if err := r.PlatformCluster.Client().Patch(ctx, ar, client.MergeFrom(arOld)); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error patching labels and/or owner references on AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-				return rr
-			}
-		}
 
 		rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
 		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
@@ -760,13 +746,6 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				),
 			),
 		)).
-		// watch owned resources and reconcile the owning Cluster if they are deleted
-		Owns(&fluxsourcev1.GitRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
-		Owns(&fluxsourcev1.OCIRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
-		Owns(&fluxsourcev1.HelmRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
-		Owns(&fluxhelmv2.HelmRelease{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
-		Owns(&corev1.Secret{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
-		Owns(&clustersv1alpha1.AccessRequest{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
 		// watch DNSServiceConfig resource and reconcile all Clusters that are known to have external-dns deployed if it changes
 		Watches(&dnsv1alpha1.DNSServiceConfig{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []ctrl.Request {
 			return collections.ProjectSliceToSlice(r.listKnownClusters(), func(nn types.NamespacedName) ctrl.Request {
