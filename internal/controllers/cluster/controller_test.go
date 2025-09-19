@@ -1,3 +1,4 @@
+//nolint:goconst
 package cluster_test
 
 import (
@@ -39,7 +40,7 @@ const (
 
 var platformScheme = install.InstallOperatorAPIsPlatform(runtime.NewScheme())
 
-func defaultTestSetup(testDirPathSegments ...string) (*testutils.Environment, *cluster.ClusterReconciler) {
+func defaultTestSetup(testDirPathSegments ...string) *testutils.Environment {
 	env := testutils.NewEnvironmentBuilder().
 		WithFakeClient(platformScheme).
 		WithInitObjectPath(testDirPathSegments...).
@@ -55,16 +56,13 @@ func defaultTestSetup(testDirPathSegments ...string) (*testutils.Environment, *c
 		}).
 		Build()
 
-	cr, ok := env.Reconciler().(*cluster.ClusterReconciler)
-	Expect(ok).To(BeTrue(), "Reconciler is not of type ClusterReconciler")
-
-	return env, cr
+	return env
 }
 
 var _ = Describe("ClusterReconciler", func() {
 
 	It("should fail if no DNSServiceConfig exists", func() {
-		env, _ := defaultTestSetup("testdata", "test-01")
+		env := defaultTestSetup("testdata", "test-01")
 
 		// delete any existing DNSServiceConfig
 		Expect(env.Client().DeleteAllOf(env.Ctx, &dnsv1alpha1.DNSServiceConfig{}, client.InNamespace(providerNamespace))).To(Succeed())
@@ -75,7 +73,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should correctly match configs to clusters and create the flux resources", func() {
-		env, _ := defaultTestSetup("testdata", "test-01")
+		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
@@ -209,7 +207,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should correctly match complex purpose selectors and don't create resources if no purpose selector matches", func() {
-		env, _ := defaultTestSetup("testdata", "test-02")
+		env := defaultTestSetup("testdata", "test-02")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
@@ -274,7 +272,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should use finalizers and remove resources when the Cluster is being deleted", func() {
-		env, _ := defaultTestSetup("testdata", "test-01")
+		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
@@ -344,7 +342,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should delete obsolete flux sources", func() {
-		env, _ := defaultTestSetup("testdata", "test-01")
+		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
@@ -388,7 +386,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should create a GitRepository if configured", func() {
-		env, _ := defaultTestSetup("testdata", "test-03")
+		env := defaultTestSetup("testdata", "test-03")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
@@ -421,7 +419,7 @@ var _ = Describe("ClusterReconciler", func() {
 	})
 
 	It("should create a HelmRepository if configured", func() {
-		env, _ := defaultTestSetup("testdata", "test-04")
+		env := defaultTestSetup("testdata", "test-04")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())

@@ -179,132 +179,144 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 
 	if c.DeletionTimestamp.IsZero() && rr.Config != nil {
 		// CREATE/UPDATE
-		log.Info("Creating or updating DNS configuration for Cluster")
+		rr = r.handleCreateOrUpdate(ctx, c, expectedLabels, rr)
+	} else {
+		// DELETE
+		rr = r.handleDelete(ctx, c, expectedLabels, rr)
+	}
 
-		// add finalizer to Cluster if not present
-		old := c.DeepCopy()
-		if controllerutil.AddFinalizer(c, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
-			log.Info("Adding finalizer to Cluster", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
-			if err := r.PlatformCluster.Client().Patch(ctx, c, client.MergeFrom(old)); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error adding finalizer to Cluster '%s/%s': %w", c.Namespace, c.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-				return rr
-			}
+	return rr
+}
+
+func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+	log.Info("Creating or updating DNS configuration for Cluster")
+
+	// add finalizer to Cluster if not present
+	old := c.DeepCopy()
+	if controllerutil.AddFinalizer(c, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
+		log.Info("Adding finalizer to Cluster", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
+		if err := r.PlatformCluster.Client().Patch(ctx, c, client.MergeFrom(old)); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error adding finalizer to Cluster '%s/%s': %w", c.Namespace, c.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
 		}
-		r.addKnownCluster(c)
+	}
+	r.addKnownCluster(c)
 
-		log.Info("Creating or updating AccessRequest to get access to Cluster")
-		ar := &clustersv1alpha1.AccessRequest{}
-		ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
-		ar.SetNamespace(c.Namespace)
-		if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), ar, func() error {
-			if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
-				return fmt.Errorf("error setting owner reference: %w", err)
-			}
-			ar.Labels = maputils.Merge(ar.Labels, expectedLabels)
-			ar.Spec.ClusterRef = &commonapi.ObjectReference{
-				Name:      c.Name,
-				Namespace: c.Namespace,
-			}
-			ar.Spec.Token = &clustersv1alpha1.TokenConfig{
-				Permissions: []clustersv1alpha1.PermissionsRequest{
-					{
-						Rules: []rbacv1.PolicyRule{ // TODO: restrict permissions
-							{
-								APIGroups: []string{"*"},
-								Resources: []string{"*"},
-								Verbs:     []string{"*"},
-							},
+	log.Info("Creating or updating AccessRequest to get access to Cluster")
+	ar := &clustersv1alpha1.AccessRequest{}
+	ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
+	ar.SetNamespace(c.Namespace)
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), ar, func() error {
+		if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
+			return fmt.Errorf("error setting owner reference: %w", err)
+		}
+		ar.Labels = maputils.Merge(ar.Labels, expectedLabels)
+		ar.Spec.ClusterRef = &commonapi.ObjectReference{
+			Name:      c.Name,
+			Namespace: c.Namespace,
+		}
+		ar.Spec.Token = &clustersv1alpha1.TokenConfig{
+			Permissions: []clustersv1alpha1.PermissionsRequest{
+				{
+					Rules: []rbacv1.PolicyRule{ // TODO: restrict permissions
+						{
+							APIGroups: []string{"*"},
+							Resources: []string{"*"},
+							Verbs:     []string{"*"},
 						},
 					},
 				},
-			}
-			return nil
-		}); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
+			},
 		}
-		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
-		}
-		if ar.Status.IsDenied() {
-			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' was denied, unable to proceed with deploying DNS configuration", ar.Namespace, ar.Name)
-			return rr
-		}
-		if !ar.Status.IsGranted() {
-			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' is not yet granted, waiting for access to be granted", ar.Namespace, ar.Name)
-			rr.Result.RequeueAfter = defaultRequeueAfterDuration
-			return rr
-		}
-		rr.AccessRequest = ar
+		return nil
+	}); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	if ar.Status.IsDenied() {
+		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' was denied, unable to proceed with deploying DNS configuration", ar.Namespace, ar.Name)
+		return rr
+	}
+	if !ar.Status.IsGranted() {
+		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' is not yet granted, waiting for access to be granted", ar.Namespace, ar.Name)
+		rr.Result.RequeueAfter = defaultRequeueAfterDuration
+		return rr
+	}
+	rr.AccessRequest = ar
 
-		rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		rr = r.deployHelmChartSource(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		rr = r.deployHelmRelease(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		rr.Message = "Successfully triggered deployment of external-dns on Cluster"
-	} else {
-		// DELETE
-		// check if the Cluster has a finalizer, otherwise we don't have to do anything
-		if !slices.Contains(c.Finalizers, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
-			log.Debug("Cluster does not have finalizer, no cleanup required", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
-			r.removeKnownCluster(c)
-			return rr
-		}
-
-		log.Info("Cleaning up DNS configuration for Cluster, either because it is being deleted or no configuration matches anymore")
-
-		rr = r.undeployHelmRelease(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		rr = r.undeployHelmChartSource(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		rr = r.undeployAuthSecret(ctx, c, expectedLabels, rr)
-		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
-			return rr
-		}
-
-		// delete AccessRequest
-		ar := &clustersv1alpha1.AccessRequest{}
-		ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), c.Name)
-		ar.Namespace = c.Namespace
-		if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
-			if !apierrors.IsNotFound(err) {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-				return rr
-			}
-		}
-
-		// remove finalizer from Cluster
-		old := c.DeepCopy()
-		if controllerutil.RemoveFinalizer(c, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
-			log.Info("Removing finalizer from Cluster", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
-			if err := r.PlatformCluster.Client().Patch(ctx, c, client.MergeFrom(old)); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error removing finalizer from Cluster '%s/%s': %w", c.Namespace, c.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-				return rr
-			}
-		}
-		r.removeKnownCluster(c)
-
-		rr.Message = "Successfully removed external-dns from Cluster"
+	rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
 	}
 
+	rr = r.deployHelmChartSource(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr = r.deployHelmRelease(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr.Message = "Successfully triggered deployment of external-dns on Cluster"
+	return rr
+}
+
+func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+	// check if the Cluster has a finalizer, otherwise we don't have to do anything
+	if !slices.Contains(c.Finalizers, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
+		log.Debug("Cluster does not have finalizer, no cleanup required", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
+		r.removeKnownCluster(c)
+		return rr
+	}
+
+	log.Info("Cleaning up DNS configuration for Cluster, either because it is being deleted or no configuration matches anymore")
+
+	rr = r.undeployHelmRelease(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr = r.undeployHelmChartSource(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr = r.undeployAuthSecret(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	// delete AccessRequest
+	ar := &clustersv1alpha1.AccessRequest{}
+	ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), c.Name)
+	ar.Namespace = c.Namespace
+	if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
+		if !apierrors.IsNotFound(err) {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+	}
+
+	// remove finalizer from Cluster
+	old := c.DeepCopy()
+	if controllerutil.RemoveFinalizer(c, dnsv1alpha1.ExternalDNSFinalizerOnCluster) {
+		log.Info("Removing finalizer from Cluster", "finalizer", dnsv1alpha1.ExternalDNSFinalizerOnCluster)
+		if err := r.PlatformCluster.Client().Patch(ctx, c, client.MergeFrom(old)); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error removing finalizer from Cluster '%s/%s': %w", c.Namespace, c.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+	}
+	r.removeKnownCluster(c)
+
+	rr.Message = "Successfully removed external-dns from Cluster"
 	return rr
 }
 
