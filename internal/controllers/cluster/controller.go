@@ -760,6 +760,13 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				),
 			),
 		)).
+		// watch owned resources and reconcile the owning Cluster if they are deleted
+		Owns(&fluxsourcev1.GitRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
+		Owns(&fluxsourcev1.OCIRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
+		Owns(&fluxsourcev1.HelmRepository{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
+		Owns(&fluxhelmv2.HelmRelease{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
+		Owns(&corev1.Secret{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
+		Owns(&clustersv1alpha1.AccessRequest{}, builder.WithPredicates(ctrlutils.OnDeletePredicate())).
 		// watch DNSServiceConfig resource and reconcile all Clusters that are known to have external-dns deployed if it changes
 		Watches(&dnsv1alpha1.DNSServiceConfig{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []ctrl.Request {
 			return collections.ProjectSliceToSlice(r.listKnownClusters(), func(nn types.NamespacedName) ctrl.Request {
@@ -767,7 +774,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			})
 		}), builder.WithPredicates(predicate.And(
 			predicate.GenerationChangedPredicate{},
-			// ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace), // TODO: add when available in controller-utils
+			ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace),
 		))).
 		Complete(r)
 }

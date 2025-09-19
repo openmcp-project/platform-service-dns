@@ -278,20 +278,18 @@ var _ = Describe("ClusterReconciler", func() {
 		srcs := &fluxsourcev1.OCIRepositoryList{}
 		Expect(env.Client().List(env.Ctx, srcs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(srcs.Items).To(HaveLen(1))
-		Expect(srcs.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedByLabel, managedByValue))
-		Expect(srcs.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedPurposeLabel, "cluster-01"))
 		// flux helm release
 		hrs := &fluxhelmv2.HelmReleaseList{}
 		Expect(env.Client().List(env.Ctx, hrs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(hrs.Items).To(HaveLen(1))
-		Expect(hrs.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedByLabel, managedByValue))
-		Expect(hrs.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedPurposeLabel, "cluster-01"))
 		// AccessRequest
 		ars := &clustersv1alpha1.AccessRequestList{}
 		Expect(env.Client().List(env.Ctx, ars, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(ars.Items).To(HaveLen(1))
-		Expect(ars.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedByLabel, managedByValue))
-		Expect(ars.Items[0].Labels).To(HaveKeyWithValue(openmcpconst.ManagedPurposeLabel, "cluster-01"))
+		// auth secret
+		ss := &corev1.SecretList{}
+		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(HaveLen(1))
 
 		// delete Cluster
 		Expect(env.Client().Delete(env.Ctx, c1)).To(Succeed())
@@ -313,10 +311,112 @@ var _ = Describe("ClusterReconciler", func() {
 			hrs = &fluxhelmv2.HelmReleaseList{}
 			g.Expect(env.Client().List(env.Ctx, hrs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 			g.Expect(hrs.Items).To(BeEmpty())
+			// auth secret
+			ss := &corev1.SecretList{}
+			g.Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+			Expect(ss.Items).To(BeEmpty())
 
 			// verify that finalizer was removed and Cluster deleted
 			g.Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(c1), c1)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
 		}).Should(Succeed())
+	})
+
+	It("should delete obsolete flux sources", func() {
+		env, _ := defaultTestSetup("testdata", "test-01")
+
+		cfg := &dnsv1alpha1.DNSServiceConfig{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+
+		// create dummy flux sources
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: "cluster-01",
+		}
+		// helm repo
+		helmSource := &fluxsourcev1.HelmRepository{}
+		helmSource.Name = "dummy"
+		helmSource.Namespace = "foo"
+		helmSource.Labels = expectedLabels
+		Expect(env.Client().Create(env.Ctx, helmSource)).To(Succeed())
+		// oci repo
+		ociSource := &fluxsourcev1.OCIRepository{}
+		ociSource.Name = "dummy"
+		ociSource.Namespace = "foo"
+		ociSource.Labels = expectedLabels
+		Expect(env.Client().Create(env.Ctx, ociSource)).To(Succeed())
+		// git repo
+		gitSource := &fluxsourcev1.GitRepository{}
+		gitSource.Name = "dummy"
+		gitSource.Namespace = "foo"
+		gitSource.Labels = expectedLabels
+		Expect(env.Client().Create(env.Ctx, gitSource)).To(Succeed())
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+		env.ShouldReconcile(testutils.RequestFromObject(c1))
+
+		// all three dummy resources should be deleted
+		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(helmSource), helmSource)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(ociSource), ociSource)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(gitSource), gitSource)).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
+	})
+
+	It("should create a GitRepository if configured", func() {
+		env, _ := defaultTestSetup("testdata", "test-03")
+
+		cfg := &dnsv1alpha1.DNSServiceConfig{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+		env.ShouldReconcile(testutils.RequestFromObject(c1))
+
+		// verify that the correct resources were created
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: "cluster-01",
+		}
+		// flux source
+		srcs := &fluxsourcev1.GitRepositoryList{}
+		Expect(env.Client().List(env.Ctx, srcs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(srcs.Items).To(HaveLen(1))
+		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
+			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
+			"Kind":       Equal("Cluster"),
+			"Name":       Equal("cluster-01"),
+		})))
+		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
+			"URL": Equal("https://example.org/repo/charts"),
+		}))
+	})
+
+	It("should create a HelmRepository if configured", func() {
+		env, _ := defaultTestSetup("testdata", "test-04")
+
+		cfg := &dnsv1alpha1.DNSServiceConfig{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+		env.ShouldReconcile(testutils.RequestFromObject(c1))
+
+		// verify that the correct resources were created
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: "cluster-01",
+		}
+		// flux source
+		srcs := &fluxsourcev1.HelmRepositoryList{}
+		Expect(env.Client().List(env.Ctx, srcs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(srcs.Items).To(HaveLen(1))
+		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
+			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
+			"Kind":       Equal("Cluster"),
+			"Name":       Equal("cluster-01"),
+		})))
+		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
+			"URL": Equal("https://example.org/repo/charts"),
+		}))
 	})
 
 })

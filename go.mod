@@ -8,7 +8,7 @@ require (
 	github.com/fluxcd/helm-controller/api v1.3.0
 	github.com/fluxcd/pkg/apis/meta v1.12.0
 	github.com/fluxcd/source-controller/api v1.6.2
-	github.com/openmcp-project/controller-utils v0.22.0
+	github.com/openmcp-project/controller-utils v0.22.1-0.20250919094614-9981cd04836f
 	github.com/openmcp-project/openmcp-operator/api v0.14.0
 	github.com/openmcp-project/openmcp-operator/lib v0.14.1-0.20250918113839-de9cd0290162
 	github.com/openmcp-project/platform-service-dns/api v0.0.0-00010101000000-000000000000
