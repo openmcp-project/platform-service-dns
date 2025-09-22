@@ -94,6 +94,13 @@ spec:
                 description: ExternalDNSSource is the source of the external-dns helm
                   chart.
                 properties:
+                  chartName:
+                    description: |-
+                      ChartName specifies the name of the external-dns chart.
+                      Depending on the source, this can also be a relative path within the repository.
+                      When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
+                    minLength: 1
+                    type: string
                   copyAuthSecret:
                     description: |-
                       SecretCopy defines the name of the secret to copy and the name of the copied secret.
@@ -655,11 +662,14 @@ spec:
                     - interval
                     - url
                     type: object
+                required:
+                - chartName
                 type: object
                 x-kubernetes-validations:
                 - message: Exactly one of 'helm', 'git', or 'oci' must be set
-                  rule: size(self.filter(property, (property != "copyAuthSecret")
-                    && (size(self[property]) > 0))) == 1
+                  rule: size(self.filter(property, (property == "helm" || property
+                    == "git" || property == "oci") && (size(self[property]) > 0)))
+                    == 1
               helmReleaseReconciliationInterval:
                 description: |-
                   HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.

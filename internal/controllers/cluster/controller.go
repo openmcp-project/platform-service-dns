@@ -516,12 +516,20 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		// labels
 		hr.Labels = maputils.Merge(hr.Labels, expectedLabels)
 		// chart
-		hr.Spec.Chart = nil
-		hr.Spec.ChartRef = &fluxhelmv2.CrossNamespaceSourceReference{
-			APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
-			Kind:       rr.SourceKind,
-			Name:       hr.Name,
-			Namespace:  hr.Namespace,
+		hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
+			Spec: fluxhelmv2.HelmChartTemplateSpec{
+				SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
+					APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+					Kind:       rr.SourceKind,
+					Name:       hr.Name,
+					Namespace:  hr.Namespace,
+				},
+			},
+		}
+		chartNameVersion := strings.Split(rr.ProviderConfig.Spec.ExternalDNSSource.ChartName, "@")
+		hr.Spec.Chart.Spec.Chart = chartNameVersion[0]
+		if len(chartNameVersion) > 1 {
+			hr.Spec.Chart.Spec.Version = chartNameVersion[1]
 		}
 		// release information
 		hr.Spec.ReleaseName = "external-dns"

@@ -32,8 +32,13 @@ type DNSServiceConfigSpec struct {
 // ExternalDNSSource defines the source of the external-dns helm chart in form of a Flux source.
 // Exactly one of 'HelmRepository', 'GitRepository' or 'OCIRepository' must be set.
 // If 'copyAuthSecret' is set, the referenced source secret is copied into the namespace where the Flux resources are created with the specified target name.
-// +kubebuilder:validation:XValidation:rule=`size(self.filter(property, (property != "copyAuthSecret") && (size(self[property]) > 0))) == 1`, message="Exactly one of 'helm', 'git', or 'oci' must be set"
+// +kubebuilder:validation:XValidation:rule=`size(self.filter(property, (property == "helm" || property == "git" || property == "oci") && (size(self[property]) > 0))) == 1`, message="Exactly one of 'helm', 'git', or 'oci' must be set"
 type ExternalDNSSource struct {
+	// ChartName specifies the name of the external-dns chart.
+	// Depending on the source, this can also be a relative path within the repository.
+	// When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
+	// +kubebuilder:validation:MinLength=1
+	ChartName      string                     `json:"chartName"`
 	Helm           *fluxv1.HelmRepositorySpec `json:"helm,omitempty"`
 	Git            *fluxv1.GitRepositorySpec  `json:"git,omitempty"`
 	OCI            *fluxv1.OCIRepositorySpec  `json:"oci,omitempty"`
