@@ -239,12 +239,11 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	// This also happens in the reconcile, but then the pod will look healthy while it is actually not able to reconcile anything.
 	svcCfg := &dnsv1alpha1.DNSServiceConfig{}
 	svcCfg.Name = o.ProviderName
-	svcCfg.Namespace = o.ProviderNamespace
 	if err := o.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(svcCfg), svcCfg); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("DNSServiceConfig '%s/%s' not found: %w", svcCfg.Namespace, svcCfg.Name, err)
+			return fmt.Errorf("DNSServiceConfig '%s' not found: %w", svcCfg.Name, err)
 		}
-		return fmt.Errorf("error getting DNSServiceConfig '%s/%s': %w", svcCfg.Namespace, svcCfg.Name, err)
+		return fmt.Errorf("error getting DNSServiceConfig '%s': %w", svcCfg.Name, err)
 	}
 	if err := cluster.NewClusterReconciler(o.PlatformCluster, mgr.GetEventRecorderFor(cluster.ControllerName), o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add Cluster reconciler to manager: %w", err)

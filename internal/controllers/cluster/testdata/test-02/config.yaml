@@ -2,7 +2,6 @@ apiVersion: dns.openmcp.cloud/v1alpha1
 kind: DNSServiceConfig
 metadata:
   name: dns-service
-  namespace: test
 spec:
   externalDNSSource:
     oci:

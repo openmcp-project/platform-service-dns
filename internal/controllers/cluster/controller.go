@@ -153,12 +153,11 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 	// load DNSServiceConfig resource
 	rr.ProviderConfig = &dnsv1alpha1.DNSServiceConfig{}
 	rr.ProviderConfig.Name = r.ProviderName
-	rr.ProviderConfig.Namespace = r.ProviderNamespace
 	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(rr.ProviderConfig), rr.ProviderConfig); err != nil {
 		if apierrors.IsNotFound(err) {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("DNSServiceConfig '%s/%s' not found", rr.ProviderConfig.Namespace, rr.ProviderConfig.Name), clusterconst.ReasonConfigurationProblem)
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("DNSServiceConfig '%s' not found", rr.ProviderConfig.Name), clusterconst.ReasonConfigurationProblem)
 		} else {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting DNSServiceConfig '%s/%s': %w", rr.ProviderConfig.Namespace, rr.ProviderConfig.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting DNSServiceConfig '%s': %w", rr.ProviderConfig.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 		}
 		return rr
 	}
@@ -773,7 +772,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			})
 		}), builder.WithPredicates(predicate.And(
 			predicate.GenerationChangedPredicate{},
-			ctrlutils.ExactNamePredicate(r.ProviderName, r.ProviderNamespace),
+			ctrlutils.ExactNamePredicate(r.ProviderName, ""),
 		))).
 		Complete(r)
 }

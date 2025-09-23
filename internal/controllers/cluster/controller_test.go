@@ -65,7 +65,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-01")
 
 		// delete any existing DNSServiceConfig
-		Expect(env.Client().DeleteAllOf(env.Ctx, &dnsv1alpha1.DNSServiceConfig{}, client.InNamespace(providerNamespace))).To(Succeed())
+		Expect(env.Client().DeleteAllOf(env.Ctx, &dnsv1alpha1.DNSServiceConfig{})).To(Succeed())
 
 		c := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c)).To(Succeed())
@@ -76,7 +76,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
@@ -210,7 +210,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-02")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
@@ -275,7 +275,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
@@ -345,7 +345,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-01")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		// create dummy flux sources
 		expectedLabels := map[string]string{
@@ -389,7 +389,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-03")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
@@ -422,7 +422,7 @@ var _ = Describe("ClusterReconciler", func() {
 		env := defaultTestSetup("testdata", "test-04")
 
 		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName, Namespace: providerNamespace}, cfg)).To(Succeed())
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
