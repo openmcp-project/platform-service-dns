@@ -10,7 +10,6 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
-	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 )
 
 func NewPlatformServiceDNSCommand() *cobra.Command {
@@ -43,8 +42,7 @@ type SharedOptions struct {
 	PlatformCluster *clusters.Cluster
 
 	// fields filled in Complete()
-	Log               logging.Logger
-	ProviderNamespace string
+	Log logging.Logger
 }
 
 func (o *SharedOptions) AddPersistentFlags(cmd *cobra.Command) {
@@ -65,10 +63,6 @@ func (o *SharedOptions) Complete() error {
 	}
 	if o.ProviderName == "" {
 		return fmt.Errorf("provider-name must not be empty")
-	}
-	o.ProviderNamespace = os.Getenv(openmcpconst.EnvVariablePodNamespace)
-	if o.ProviderNamespace == "" {
-		return fmt.Errorf("environment variable '%s' must be set", openmcpconst.EnvVariablePodNamespace)
 	}
 
 	// build logger

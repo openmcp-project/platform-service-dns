@@ -4,20 +4,25 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/openmcp-project/controller-utils/pkg/logging"
+	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 
+	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 	providerscheme "github.com/openmcp-project/platform-service-dns/api/install"
 	"github.com/openmcp-project/platform-service-dns/internal/controllers/cluster"
 )
@@ -79,6 +84,7 @@ type RunOptions struct {
 	MetricsServerOptions metricsserver.Options
 	MetricsCertWatcher   *certwatcher.CertWatcher
 	WebhookCertWatcher   *certwatcher.CertWatcher
+	ProviderNamespace    string
 }
 
 func (o *RunOptions) AddFlags(cmd *cobra.Command) {
@@ -101,6 +107,11 @@ func (o *RunOptions) Complete(ctx context.Context) error {
 	if err := o.SharedOptions.Complete(); err != nil {
 		return err
 	}
+	o.ProviderNamespace = os.Getenv(openmcpconst.EnvVariablePodNamespace)
+	if o.ProviderNamespace == "" {
+		return fmt.Errorf("environment variable '%s' must be set", openmcpconst.EnvVariablePodNamespace)
+	}
+
 	setupLog = o.Log.WithName("setup")
 	ctrl.SetLogger(o.Log.Logr())
 
@@ -223,6 +234,18 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		return fmt.Errorf("unable to create manager: %w", err)
 	}
 
+	// setup Cluster reconciler
+	// verify DNSServiceConfig existence
+	// This also happens in the reconcile, but then the pod will look healthy while it is actually not able to reconcile anything.
+	svcCfg := &dnsv1alpha1.DNSServiceConfig{}
+	svcCfg.Name = o.ProviderName
+	svcCfg.Namespace = o.ProviderNamespace
+	if err := o.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(svcCfg), svcCfg); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("DNSServiceConfig '%s/%s' not found: %w", svcCfg.Namespace, svcCfg.Name, err)
+		}
+		return fmt.Errorf("error getting DNSServiceConfig '%s/%s': %w", svcCfg.Namespace, svcCfg.Name, err)
+	}
 	if err := cluster.NewClusterReconciler(o.PlatformCluster, mgr.GetEventRecorderFor(cluster.ControllerName), o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add Cluster reconciler to manager: %w", err)
 	}

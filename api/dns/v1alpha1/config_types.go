@@ -32,7 +32,7 @@ type DNSServiceConfigSpec struct {
 // ExternalDNSSource defines the source of the external-dns helm chart in form of a Flux source.
 // Exactly one of 'HelmRepository', 'GitRepository' or 'OCIRepository' must be set.
 // If 'copyAuthSecret' is set, the referenced source secret is copied into the namespace where the Flux resources are created with the specified target name.
-// +kubebuilder:validation:XValidation:rule=`size(self.filter(property, (property == "helm" || property == "git" || property == "oci") && (size(self[property]) > 0))) == 1`, message="Exactly one of 'helm', 'git', or 'oci' must be set"
+// +kubebuilder:validation:ExactlyOneOf=helm;git;oci
 type ExternalDNSSource struct {
 	// ChartName specifies the name of the external-dns chart.
 	// Depending on the source, this can also be a relative path within the repository.
@@ -70,6 +70,7 @@ type ExternalDNSPurposeConfig struct {
 	HelmReleaseReconciliationInterval *metav1.Duration `json:"helmReleaseReconciliationInterval,omitempty"`
 
 	// HelmValues are the helm values to deploy external-dns with, if the purpose selector matches.
+	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Schemaless
 	HelmValues *apiextensionsv1.JSON `json:"helmValues"`
 }
@@ -81,17 +82,23 @@ type PurposeSelector struct {
 
 // PurposeSelectorRequirement is a selector to select purposes to apply the configuration to.
 // The struct can be combined recursively using "and", "or" and "not" to build complex selectors.
-// Exactly one of the fields must be set.
+// Exactly one of the fields must be set, otherwise only one of them is evaluated in the order: name, not, and, or.
 // If name is set, the selector matches if the Cluster's purposes contain the given name.
 // If and is set, the selector matches if all of the contained selectors match.
 // If or is set, the selector matches if any of the contained selectors match.
 // If not is set, the selector matches if the contained selector does not match.
-// +kubebuilder:validation:XValidation:rule=`size(self.filter(property, size(self[property]) > 0)) == 1`, message="Exactly one of 'and', 'or', 'not' or 'name' must be set"
 type PurposeSelectorRequirement struct {
-	And  []PurposeSelectorRequirement `json:"and,omitempty"`
-	Or   []PurposeSelectorRequirement `json:"or,omitempty"`
-	Not  *PurposeSelectorRequirement  `json:"not,omitempty"`
-	Name string                       `json:"name,omitempty"`
+	// +kubebuilder:validation:items:Type=object
+	// +optional
+	And []PurposeSelectorRequirement `json:"and,omitempty"`
+	// +kubebuilder:validation:items:Type=object
+	// +optional
+	Or []PurposeSelectorRequirement `json:"or,omitempty"`
+	// +kubebuilder:validation:Type=object
+	// +optional
+	Not *PurposeSelectorRequirement `json:"not,omitempty"`
+	// +optional
+	Name string `json:"name,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -142,6 +149,9 @@ func requirementMatches(r *PurposeSelectorRequirement, purposes []string, seenRe
 	if r.Name != "" {
 		return slices.Contains(purposes, r.Name)
 	}
+	if r.Not != nil {
+		return !requirementMatches(r.Not, purposes, seenRequirements)
+	}
 	if len(r.And) > 0 {
 		for i := range r.And {
 			if !requirementMatches(&r.And[i], purposes, seenRequirements) {
@@ -157,9 +167,6 @@ func requirementMatches(r *PurposeSelectorRequirement, purposes []string, seenRe
 			}
 		}
 		return false
-	}
-	if r.Not != nil {
-		return !requirementMatches(r.Not, purposes, seenRequirements)
 	}
 	return false
 }

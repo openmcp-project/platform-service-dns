@@ -61,6 +61,7 @@ spec:
                     helmValues:
                       description: HelmValues are the helm values to deploy external-dns
                         with, if the purpose selector matches.
+                      type: string
                     name:
                       description: |-
                         Name is an optional name.
@@ -72,20 +73,18 @@ spec:
                         If not set, all Clusters are matched.
                       properties:
                         and:
-                          items: {}
+                          items:
+                            type: object
                           type: array
                         name:
                           type: string
-                        not: {}
+                        not:
+                          type: object
                         or:
-                          items: {}
+                          items:
+                            type: object
                           type: array
                       type: object
-                      x-kubernetes-validations:
-                      - message: Exactly one of 'and', 'or', 'not' or 'name' must
-                          be set
-                        rule: size(self.filter(property, size(self[property]) > 0))
-                          == 1
                   required:
                   - helmValues
                   type: object
@@ -665,11 +664,6 @@ spec:
                 required:
                 - chartName
                 type: object
-                x-kubernetes-validations:
-                - message: Exactly one of 'helm', 'git', or 'oci' must be set
-                  rule: size(self.filter(property, (property == "helm" || property
-                    == "git" || property == "oci") && (size(self[property]) > 0)))
-                    == 1
               helmReleaseReconciliationInterval:
                 description: |-
                   HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
