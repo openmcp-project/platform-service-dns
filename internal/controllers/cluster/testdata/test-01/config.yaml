@@ -3,15 +3,17 @@ kind: DNSServiceConfig
 metadata:
   name: dns-service
 spec:
+  secretsToCopy:
+  - source:
+      name: my-auth
+    target:
+      name: my-auth-copy
+  - source:
+      name: my-other-secret
   externalDNSSource:
     oci:
       url: "oci://example.org/repo/charts"
       interval: 10m
-    copyAuthSecret:
-      source:
-        name: my-auth
-      target:
-        name: my-auth-copy
   externalDNSForPurposes:
   - name: foo
     purposeSelector:

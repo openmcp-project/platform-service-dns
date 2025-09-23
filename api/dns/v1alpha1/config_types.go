@@ -16,6 +16,11 @@ type DNSServiceConfigSpec struct {
 	// ExternalDNSSource is the source of the external-dns helm chart.
 	ExternalDNSSource ExternalDNSSource `json:"externalDNSSource"`
 
+	// SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
+	// This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
+	// +optional
+	SecretsToCopy []SecretCopy `json:"secretsToCopy,omitempty"`
+
 	// HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
 	// The value can be overwritten for specific purposes using ExternalDNSForPurposes.
 	// If not set, a default of 1h is used.
@@ -38,11 +43,10 @@ type ExternalDNSSource struct {
 	// Depending on the source, this can also be a relative path within the repository.
 	// When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
 	// +kubebuilder:validation:MinLength=1
-	ChartName      string                     `json:"chartName"`
-	Helm           *fluxv1.HelmRepositorySpec `json:"helm,omitempty"`
-	Git            *fluxv1.GitRepositorySpec  `json:"git,omitempty"`
-	OCI            *fluxv1.OCIRepositorySpec  `json:"oci,omitempty"`
-	CopyAuthSecret *SecretCopy                `json:"copyAuthSecret,omitempty"`
+	ChartName string                     `json:"chartName"`
+	Helm      *fluxv1.HelmRepositorySpec `json:"helm,omitempty"`
+	Git       *fluxv1.GitRepositorySpec  `json:"git,omitempty"`
+	OCI       *fluxv1.OCIRepositorySpec  `json:"oci,omitempty"`
 }
 
 // SecretCopy defines the name of the secret to copy and the name of the copied secret.
@@ -70,6 +74,12 @@ type ExternalDNSPurposeConfig struct {
 	HelmReleaseReconciliationInterval *metav1.Duration `json:"helmReleaseReconciliationInterval,omitempty"`
 
 	// HelmValues are the helm values to deploy external-dns with, if the purpose selector matches.
+	// There are a few special strings which will be replaced before creating the HelmRelease:
+	// - <provider.name> will be replaced with the provider name resource.
+	// - <provider.namespace> will be replaced with the namespace that hosts the platform service.
+	// - <environment> will be replaced with the environment name of the operator.
+	// - <cluster.name> will be replaced with the name of the reconciled Cluster.
+	// - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Schemaless
 	HelmValues *apiextensionsv1.JSON `json:"helmValues"`

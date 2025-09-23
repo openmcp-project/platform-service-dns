@@ -59,8 +59,14 @@ spec:
                         If not set, the global HelmReleaseReconciliationInterval is used.
                       type: string
                     helmValues:
-                      description: HelmValues are the helm values to deploy external-dns
-                        with, if the purpose selector matches.
+                      description: |-
+                        HelmValues are the helm values to deploy external-dns with, if the purpose selector matches.
+                        There are a few special strings which will be replaced before creating the HelmRelease:
+                        - <provider.name> will be replaced with the provider name resource.
+                        - <provider.namespace> will be replaced with the namespace that hosts the platform service.
+                        - <environment> will be replaced with the environment name of the operator.
+                        - <cluster.name> will be replaced with the name of the reconciled Cluster.
+                        - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
                       type: string
                     name:
                       description: |-
@@ -100,45 +106,6 @@ spec:
                       When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
                     minLength: 1
                     type: string
-                  copyAuthSecret:
-                    description: |-
-                      SecretCopy defines the name of the secret to copy and the name of the copied secret.
-                      If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
-                    properties:
-                      source:
-                        description: LocalObjectReference is a reference to an object
-                          in the same namespace as the resource referencing it.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                      target:
-                        description: LocalObjectReference is a reference to an object
-                          in the same namespace as the resource referencing it.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                    required:
-                    - source
-                    - target
-                    type: object
                   git:
                     description: |-
                       GitRepositorySpec specifies the required configuration to produce an
@@ -670,6 +637,50 @@ spec:
                   The value can be overwritten for specific purposes using ExternalDNSForPurposes.
                   If not set, a default of 1h is used.
                 type: string
+              secretsToCopy:
+                description: |-
+                  SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
+                  This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
+                items:
+                  description: |-
+                    SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                    If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
+                  properties:
+                    source:
+                      description: LocalObjectReference is a reference to an object
+                        in the same namespace as the resource referencing it.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    target:
+                      description: LocalObjectReference is a reference to an object
+                        in the same namespace as the resource referencing it.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - source
+                  - target
+                  type: object
+                type: array
             required:
             - externalDNSSource
             type: object

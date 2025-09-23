@@ -89,7 +89,7 @@ var _ = Describe("ClusterReconciler", func() {
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
 			openmcpconst.ManagedByLabel:      managedByValue,
-			openmcpconst.ManagedPurposeLabel: "cluster-01",
+			openmcpconst.ManagedPurposeLabel: c1.Name,
 		}
 		// flux source
 		srcs := &fluxsourcev1.OCIRepositoryList{}
@@ -98,7 +98,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
+			"Name":       Equal(c1.Name),
 		})))
 		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"URL": Equal("oci://example.org/repo/charts"),
@@ -110,7 +110,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(hrs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
+			"Name":       Equal(c1.Name),
 		})))
 		Expect(hrs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"ReleaseName":     Equal("external-dns"),
@@ -125,23 +125,36 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(ars.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
+			"Name":       Equal(c1.Name),
 		})))
 		Expect(ars.Items[0].Spec.ClusterRef).To(PointTo(MatchFields(IgnoreExtras, Fields{
-			"Name":      Equal("cluster-01"),
+			"Name":      Equal(c1.Name),
 			"Namespace": Equal("foo"),
 		})))
-		// auth secret
+		// copied secrets (including deletion of the obsolete one)
 		ss := &corev1.SecretList{}
 		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
-		Expect(ss.Items).To(HaveLen(1))
-		Expect(ss.Items[0].Name).To(Equal("my-auth-copy"))
-		Expect(ss.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
-			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
-			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
-		})))
-		Expect(ss.Items[0].Data).To(HaveKeyWithValue("key", []byte("value")))
+		Expect(ss.Items).To(ConsistOf(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("value")}),
+			}),
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-other-secret"),
+				}),
+				"Data": Equal(map[string][]byte{"foo": []byte("bar")}),
+			}),
+		))
+		for _, s := range ss.Items {
+			Expect(s.OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
+				"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
+				"Kind":       Equal("Cluster"),
+				"Name":       Equal(c1.Name),
+			})), "secret '%s/%s' does not have the expected owner reference", s.Namespace, s.Name)
+		}
 
 		c2 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-02", Namespace: "bar"}, c2)).To(Succeed())
@@ -152,7 +165,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(rr.RequeueAfter).To(BeZero())
 
 		// verify that the correct flux resources were created
-		expectedLabels[openmcpconst.ManagedPurposeLabel] = "cluster-02"
+		expectedLabels[openmcpconst.ManagedPurposeLabel] = c2.Name
 		// flux source
 		srcs = &fluxsourcev1.OCIRepositoryList{}
 		Expect(env.Client().List(env.Ctx, srcs, client.InNamespace(c2.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
@@ -160,7 +173,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-02"),
+			"Name":       Equal(c2.Name),
 		})))
 		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"URL": Equal("oci://example.org/repo/charts"),
@@ -172,7 +185,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(hrs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-02"),
+			"Name":       Equal(c2.Name),
 		})))
 		Expect(hrs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"ReleaseName":     Equal("external-dns"),
@@ -187,23 +200,35 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(ars.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-02"),
+			"Name":       Equal(c2.Name),
 		})))
 		Expect(ars.Items[0].Spec.ClusterRef).To(PointTo(MatchFields(IgnoreExtras, Fields{
-			"Name":      Equal("cluster-02"),
+			"Name":      Equal(c2.Name),
 			"Namespace": Equal("bar"),
 		})))
-		// auth secret
-		ss = &corev1.SecretList{}
+		// copied secrets
 		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c2.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
-		Expect(ss.Items).To(HaveLen(1))
-		Expect(ss.Items[0].Name).To(Equal("my-auth-copy"))
-		Expect(ss.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
-			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
-			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-02"),
-		})))
-		Expect(ss.Items[0].Data).To(HaveKeyWithValue("key", []byte("value")))
+		Expect(ss.Items).To(ConsistOf(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("value")}),
+			}),
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-other-secret"),
+				}),
+				"Data": Equal(map[string][]byte{"foo": []byte("bar")}),
+			}),
+		))
+		for _, s := range ss.Items {
+			Expect(s.OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
+				"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
+				"Kind":       Equal("Cluster"),
+				"Name":       Equal(c2.Name),
+			})), "secret '%s/%s' does not have the expected owner reference", s.Namespace, s.Name)
+		}
 	})
 
 	It("should correctly match complex purpose selectors and don't create resources if no purpose selector matches", func() {
@@ -292,7 +317,7 @@ var _ = Describe("ClusterReconciler", func() {
 		// verify that the flux resources were created
 		expectedLabels := map[string]string{
 			openmcpconst.ManagedByLabel:      managedByValue,
-			openmcpconst.ManagedPurposeLabel: "cluster-01",
+			openmcpconst.ManagedPurposeLabel: c1.Name,
 		}
 		// flux source
 		srcs := &fluxsourcev1.OCIRepositoryList{}
@@ -306,10 +331,10 @@ var _ = Describe("ClusterReconciler", func() {
 		ars := &clustersv1alpha1.AccessRequestList{}
 		Expect(env.Client().List(env.Ctx, ars, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(ars.Items).To(HaveLen(1))
-		// auth secret
+		// copied secrets
 		ss := &corev1.SecretList{}
 		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
-		Expect(ss.Items).To(HaveLen(1))
+		Expect(ss.Items).To(HaveLen(2))
 
 		// delete Cluster
 		Expect(env.Client().Delete(env.Ctx, c1)).To(Succeed())
@@ -402,7 +427,7 @@ var _ = Describe("ClusterReconciler", func() {
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
 			openmcpconst.ManagedByLabel:      managedByValue,
-			openmcpconst.ManagedPurposeLabel: "cluster-01",
+			openmcpconst.ManagedPurposeLabel: c1.Name,
 		}
 		// flux source
 		srcs := &fluxsourcev1.GitRepositoryList{}
@@ -411,7 +436,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
+			"Name":       Equal(c1.Name),
 		})))
 		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"URL": Equal("https://example.org/repo/charts"),
@@ -435,7 +460,7 @@ var _ = Describe("ClusterReconciler", func() {
 		// verify that the correct resources were created
 		expectedLabels := map[string]string{
 			openmcpconst.ManagedByLabel:      managedByValue,
-			openmcpconst.ManagedPurposeLabel: "cluster-01",
+			openmcpconst.ManagedPurposeLabel: c1.Name,
 		}
 		// flux source
 		srcs := &fluxsourcev1.HelmRepositoryList{}
@@ -444,7 +469,7 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(srcs.Items[0].OwnerReferences).To(ContainElements(MatchFields(IgnoreExtras, Fields{
 			"APIVersion": Equal(clustersv1alpha1.GroupVersion.String()),
 			"Kind":       Equal("Cluster"),
-			"Name":       Equal("cluster-01"),
+			"Name":       Equal(c1.Name),
 		})))
 		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"URL": Equal("https://example.org/repo/charts"),

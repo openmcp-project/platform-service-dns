@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -248,7 +249,12 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 	}
 	rr.AccessRequest = ar
 
-	rr = r.deployAuthSecret(ctx, c, expectedLabels, rr)
+	rr, copied := r.copySecrets(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+	// remove any secrets that were copied in a previous run but are no longer configured to be copied
+	rr = r.uncopySecrets(ctx, c, expectedLabels, rr, copied)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
@@ -288,7 +294,7 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 		return rr
 	}
 
-	rr = r.undeployAuthSecret(ctx, c, expectedLabels, rr)
+	rr = r.uncopySecrets(ctx, c, expectedLabels, rr, nil)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
@@ -319,50 +325,52 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 	return rr
 }
 
-// deployAuthSecret copies the auth secret (for access to the helm chart source) into the Cluster namespace if configured.
-func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+// copySecrets copies the configured secrets into the Cluster namespace.
+// Returns a list of the names of the copied secrets.
+func (r *ClusterReconciler) copySecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) (ReconcileResult, sets.Set[string]) {
 	log := logging.FromContextOrPanic(ctx)
+	copied := sets.New[string]()
 
-	// copy secret if configured
-	if rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret != nil {
+	// copy secrets if configured
+	for i, stc := range rr.ProviderConfig.Spec.SecretsToCopy {
 		source := &corev1.Secret{}
-		source.Name = rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Source.Name
+		source.Name = stc.Source.Name
 		source.Namespace = r.ProviderNamespace
-		log.Debug("Auth secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name)
+		log.Debug("Secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name, "index", i)
 		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(source), source); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s': %w", source.Namespace, source.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s' (index: %d): %w", source.Namespace, source.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr, copied
 		}
 
 		// check if target secret already exists
 		target := &corev1.Secret{}
 		target.Name = source.Name
-		if rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target != nil && rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name != "" {
-			target.Name = rr.ProviderConfig.Spec.ExternalDNSSource.CopyAuthSecret.Target.Name
+		if stc.Target != nil && stc.Target.Name != "" {
+			target.Name = stc.Target.Name
 		}
 		target.Namespace = c.Namespace
 		targetExists := true
 		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
 			if !apierrors.IsNotFound(err) {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s': %w", target.Namespace, target.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-				return rr
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				return rr, copied
 			}
 			targetExists = false
 		}
 		if targetExists {
 			// if target secret exists, verify that it is managed by us
-			log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name)
+			log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
 			for k, v := range expectedLabels {
 				if v2, ok := target.Labels[k]; !ok || v2 != v {
-					rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' already exists and is not managed by %s controller", target.Namespace, target.Name, ControllerName), clusterconst.ReasonConfigurationProblem)
-					return rr
+					rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' (index: %d) already exists and is not managed by %s controller", target.Namespace, target.Name, i, ControllerName), clusterconst.ReasonConfigurationProblem)
+					return rr, copied
 				}
 			}
 		}
-		log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name)
+		log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), target, func() error {
 			if err := controllerutil.SetOwnerReference(c, target, r.PlatformCluster.Scheme()); err != nil {
-				return fmt.Errorf("error setting owner reference on target secret '%s/%s': %w", target.Namespace, target.Name, err)
+				return fmt.Errorf("error setting owner reference on target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err)
 			}
 			target.Labels = maputils.Merge(target.Labels, source.Labels, expectedLabels)
 			target.Annotations = maputils.Merge(target.Annotations, source.Annotations)
@@ -371,14 +379,14 @@ func (r *ClusterReconciler) deployAuthSecret(ctx context.Context, c *clustersv1a
 			target.Type = source.Type
 			return nil
 		}); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s': %w", target.Namespace, target.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr, copied
 		}
-
-		rr.Message = "Successfully copied auth secret into Cluster namespace."
+		copied.Insert(target.Name)
 	}
+	rr.Message = fmt.Sprintf("Successfully copied %d secrets into Cluster namespace", len(rr.ProviderConfig.Spec.SecretsToCopy))
 
-	return rr
+	return rr, copied
 }
 
 // deployHelmChartSource deploys the configured Flux source (HelmRepository, GitRepository, OCIRepository) into the Cluster namespace.
@@ -681,9 +689,10 @@ func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clus
 	return rr
 }
 
-// undeployAuthSecret removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
+// uncopySecrets removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
+// Secrets listed in 'keep' are not deleted.
 // It does not wait for their deletion.
-func (r *ClusterReconciler) undeployAuthSecret(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) ReconcileResult {
+func (r *ClusterReconciler) uncopySecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult, keep sets.Set[string]) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 
 	// list existing secrets to detect obsolete ones
@@ -693,18 +702,26 @@ func (r *ClusterReconciler) undeployAuthSecret(ctx context.Context, c *clustersv
 		return rr
 	}
 
+	deleted := 0
+	kept := 0
 	for i := range existingSecrets.Items {
 		obj := &existingSecrets.Items[i]
-		log.Info("Deleting auth secret", "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
+		if keep.Has(obj.Name) {
+			log.Debug("Keeping copied secret", "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
+			kept++
+			continue
+		}
+		log.Info("Deleting copied secret", "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
 		if err := r.PlatformCluster.Client().Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
 				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting Secret '%s/%s': %w", obj.GetNamespace(), obj.GetName(), err), clusterconst.ReasonPlatformClusterInteractionProblem)
 				return rr
 			}
 		}
+		deleted++
 	}
 
-	rr.Message = "Deleted all auth secrets for Cluster."
+	rr.Message = fmt.Sprintf("Deleted %d copied secrets from Cluster namespace, kept %d.", deleted, kept)
 	return rr
 }
 

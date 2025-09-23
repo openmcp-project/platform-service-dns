@@ -74,6 +74,13 @@ func (in *DNSServiceConfigList) DeepCopyObject() runtime.Object {
 func (in *DNSServiceConfigSpec) DeepCopyInto(out *DNSServiceConfigSpec) {
 	*out = *in
 	in.ExternalDNSSource.DeepCopyInto(&out.ExternalDNSSource)
+	if in.SecretsToCopy != nil {
+		in, out := &in.SecretsToCopy, &out.SecretsToCopy
+		*out = make([]SecretCopy, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.HelmReleaseReconciliationInterval != nil {
 		in, out := &in.HelmReleaseReconciliationInterval, &out.HelmReleaseReconciliationInterval
 		*out = new(v1.Duration)
@@ -144,11 +151,6 @@ func (in *ExternalDNSSource) DeepCopyInto(out *ExternalDNSSource) {
 	if in.OCI != nil {
 		in, out := &in.OCI, &out.OCI
 		*out = new(apiv1.OCIRepositorySpec)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.CopyAuthSecret != nil {
-		in, out := &in.CopyAuthSecret, &out.CopyAuthSecret
-		*out = new(SecretCopy)
 		(*in).DeepCopyInto(*out)
 	}
 }
