@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,8 +79,6 @@ type ReconcileResult struct {
 	ReconcileError errutils.ReasonableError
 	// Config is the selected configuration that was applied to the Cluster, if it could be determined.
 	Config *dnsv1alpha1.ExternalDNSPurposeConfig
-	// ConfigIndex is the index of the selected configuration in the DNSServiceConfig, or -1 if no configuration was selected.
-	ConfigIndex int
 	// SourceKind is the kind of Flux source that was deployed (HelmRepository, GitRepository, OCIRepository), if any.
 	SourceKind string
 	// AccessRequest is the AccessRequest that provides access to the Cluster, if access was successfully obtained.
@@ -170,13 +167,11 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		if cfg.PurposeSelector.Matches(c.Spec.Purposes) {
 			log.Info("Found configuration with matching purpose selector", "configName", cfg.Name, "configIndex", i)
 			rr.Config = &rr.ProviderConfig.Spec.ExternalDNSForPurposes[i]
-			rr.ConfigIndex = i
 			break
 		}
 	}
 	if rr.Config == nil {
 		log.Info("No configuration with matching purpose selector found")
-		rr.ConfigIndex = -1
 	}
 
 	if c.DeletionTimestamp.IsZero() && rr.Config != nil {
@@ -219,15 +214,10 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 			Namespace: c.Namespace,
 		}
 		ar.Spec.Token = &clustersv1alpha1.TokenConfig{
-			Permissions: []clustersv1alpha1.PermissionsRequest{
+			RoleRefs: []commonapi.RoleRef{
 				{
-					Rules: []rbacv1.PolicyRule{ // TODO: restrict permissions
-						{
-							APIGroups: []string{"*"},
-							Resources: []string{"*"},
-							Verbs:     []string{"*"},
-						},
-					},
+					Kind: "ClusterRole",
+					Name: "cluster-admin",
 				},
 			},
 		}
@@ -256,7 +246,7 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 		return rr
 	}
 	// remove any secrets that were copied in a previous run but are no longer configured to be copied
-	rr = r.uncopySecrets(ctx, c, expectedLabels, rr, copied)
+	rr = r.removeSecrets(ctx, c, expectedLabels, rr, copied)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
@@ -296,7 +286,7 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 		return rr
 	}
 
-	rr = r.uncopySecrets(ctx, c, expectedLabels, rr, nil)
+	rr = r.removeSecrets(ctx, c, expectedLabels, rr, nil)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
@@ -698,10 +688,10 @@ func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clus
 	return rr
 }
 
-// uncopySecrets removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
+// removeSecrets removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
 // Secrets listed in 'keep' are not deleted.
 // It does not wait for their deletion.
-func (r *ClusterReconciler) uncopySecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult, keep sets.Set[string]) ReconcileResult {
+func (r *ClusterReconciler) removeSecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult, keep sets.Set[string]) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
 
 	// list existing secrets to detect obsolete ones
