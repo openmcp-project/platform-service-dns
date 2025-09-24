@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,17 +54,18 @@ type ClusterReconciler struct {
 	eventRecorder     record.EventRecorder
 	ProviderName      string
 	ProviderNamespace string
+	Environment       string
 	KnownClusters     map[types.NamespacedName]struct{}
 	KnownClustersLock *sync.RWMutex
-	FakeClientMapping map[string]client.Client // this must be nil except for unit tests
 }
 
-func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace string) *ClusterReconciler {
+func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace, environment string) *ClusterReconciler {
 	return &ClusterReconciler{
 		PlatformCluster:   platformCluster,
 		eventRecorder:     recorder,
 		ProviderName:      providerName,
 		ProviderNamespace: providerNamespace,
+		Environment:       environment,
 		KnownClusters:     map[types.NamespacedName]struct{}{},
 		KnownClustersLock: &sync.RWMutex{},
 	}
@@ -542,7 +544,14 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		hr.Spec.ReleaseName = "external-dns"
 		hr.Spec.TargetNamespace = "external-dns"
 		// values
-		hr.Spec.Values = rr.Config.HelmValues.DeepCopy()
+		values := string(rr.Config.HelmValues.Raw)
+		// at some point '<' and '>' get escaped and we have to match the escaped version here
+		values = strings.ReplaceAll(values, fmt.Sprintf("%sprovider.namespace%s", "\\u003c", "\\u003e"), r.ProviderNamespace)
+		values = strings.ReplaceAll(values, fmt.Sprintf("%sprovider.name%s", "\\u003c", "\\u003e"), r.ProviderName)
+		values = strings.ReplaceAll(values, fmt.Sprintf("%senvironment%s", "\\u003c", "\\u003e"), r.Environment)
+		values = strings.ReplaceAll(values, fmt.Sprintf("%scluster.namespace%s", "\\u003c", "\\u003e"), c.Namespace)
+		values = strings.ReplaceAll(values, fmt.Sprintf("%scluster.name%s", "\\u003c", "\\u003e"), c.Name)
+		hr.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(values)}
 		// install configuration
 		if hr.Spec.Install == nil {
 			hr.Spec.Install = &fluxhelmv2.Install{}

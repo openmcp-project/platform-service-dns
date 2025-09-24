@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/yaml"
 
 	fluxhelmv2 "github.com/fluxcd/helm-controller/api/v2"
 	fluxsourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -35,6 +36,7 @@ const (
 
 	providerName      = "dns-service"
 	providerNamespace = "test"
+	environment       = "default"
 	managedByValue    = providerName + "." + cluster.ControllerName
 )
 
@@ -46,13 +48,7 @@ func defaultTestSetup(testDirPathSegments ...string) *testutils.Environment {
 		WithInitObjectPath(testDirPathSegments...).
 		WithDynamicObjectsWithStatus(&clustersv1alpha1.AccessRequest{}).
 		WithReconcilerConstructor(func(c client.Client) reconcile.Reconciler {
-			cRec := cluster.NewClusterReconciler(clusters.NewTestClusterFromClient(platformCluster, c), nil, providerName, providerNamespace)
-			cRec.FakeClientMapping = map[string]client.Client{
-				"cluster-01": nil,
-				"cluster-02": nil,
-				"cluster-03": nil,
-			}
-			return cRec
+			return cluster.NewClusterReconciler(clusters.NewTestClusterFromClient(platformCluster, c), nil, providerName, providerNamespace, environment)
 		}).
 		Build()
 
@@ -474,6 +470,37 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(srcs.Items[0].Spec).To(MatchFields(IgnoreExtras, Fields{
 			"URL": Equal("https://example.org/repo/charts"),
 		}))
+	})
+
+	It("should replace the special keywords in the values correctly", func() {
+		env := defaultTestSetup("testdata", "test-03")
+
+		cfg := &dnsv1alpha1.DNSServiceConfig{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
+
+		// verify that the correct resources were created
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: c1.Name,
+		}
+		hrs := &fluxhelmv2.HelmReleaseList{}
+		Expect(env.Client().List(env.Ctx, hrs, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(hrs.Items).To(HaveLen(1))
+		valueData := map[string]any{}
+		Expect(yaml.Unmarshal(hrs.Items[0].Spec.Values.Raw, &valueData)).To(Succeed())
+		Expect(valueData).To(HaveKeyWithValue("clusterName", c1.Name))
+		Expect(valueData).To(HaveKeyWithValue("clusterNamespace", c1.Namespace))
+		Expect(valueData).To(HaveKeyWithValue("environment", environment))
+		Expect(valueData).To(HaveKeyWithValue("providerName", providerName))
+		Expect(valueData).To(HaveKeyWithValue("providerNamespace", providerNamespace))
 	})
 
 })

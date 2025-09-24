@@ -11,7 +11,5 @@ spec:
   - name: foo
     purposeSelector:
       name: foo
-    helmValues: |
-      {
-        "foo": "foo"
-      }
+    helmValues:
+      foo: foo

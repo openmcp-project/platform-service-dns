@@ -18,16 +18,12 @@ spec:
           and:
           - name: foo
           - name: bar
-    helmValues: |
-      {
-        "foo": "baz"
-      }
+    helmValues:
+      foo: baz
   - name: foobar
     purposeSelector:
       and:
       - name: foo
       - name: foobar
-    helmValues: |
-      {
-        "foo": "foo"
-      }
+    helmValues:
+      foo: foo

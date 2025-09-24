@@ -245,7 +245,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		}
 		return fmt.Errorf("error getting DNSServiceConfig '%s': %w", svcCfg.Name, err)
 	}
-	if err := cluster.NewClusterReconciler(o.PlatformCluster, mgr.GetEventRecorderFor(cluster.ControllerName), o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
+	if err := cluster.NewClusterReconciler(o.PlatformCluster, mgr.GetEventRecorderFor(cluster.ControllerName), o.ProviderName, o.ProviderNamespace, o.Environment).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add Cluster reconciler to manager: %w", err)
 	}
 

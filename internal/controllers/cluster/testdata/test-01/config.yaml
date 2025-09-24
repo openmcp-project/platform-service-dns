@@ -18,17 +18,11 @@ spec:
   - name: foo
     purposeSelector:
       name: foo
-    helmValues: |
-      {
-        "foo": "foo"
-      }
+    helmValues:
+      foo: foo
   - name: asdf
-    helmValues: |
-      {
-        "foo": "bar"
-      }
+    helmValues:
+      foo: bar
   - name: qwer
-    helmValues: |
-      {
-        "foo": "baz"
-      }
+    helmValues:
+      foo: baz
