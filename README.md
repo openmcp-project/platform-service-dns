@@ -4,11 +4,32 @@
 
 ## About this project
 
-Platform Service DNS discovers endpoints of remote services
+PlatformService DNS is a `PlatformService` as described in [the OpenMCP Architecture Docs](https://github.com/openmcp-project/docs/blob/main/architecture/general/open-mcp-landscape-overview.md). 
+
+It is a k8s controller that reconciles `Cluster` resources (from our [Cluster API](https://github.com/openmcp-project/docs/blob/main/adrs/cluster-api.md)) and deploys the [external-dns](https://github.com/kubernetes-sigs/external-dns) operator with a configuration depending on the `Cluster`'s purpose(s). The main goal of the service is to help setting up cross-cluster DNS routing for dynamically managed clusters, especially to enable `ValidatingWebhookConfiguration` resources pointing to webhooks served on other clusters.
 
 ## Requirements and Setup
 
-*Insert a short description what is required to get your project running...*
+In combination with the [openMCP Operator](https://github.com/openmcp-project/openmcp-operator), this controller can be deployed via a simple k8s resource:
+```yaml
+apiVersion: openmcp.cloud/v1alpha1
+kind: PlatformService
+metadata:
+  name: dns
+spec:
+  image: "ghcr.io/openmcp-project/images/platform-service-dns:v0.1.0"
+```
+
+To run it locally, run
+```shell
+go run ./cmd/platform-service-dns/main.go init --environment default --provider-name dns --kubeconfig path/to/kubeconfig
+```
+to deploy the CRDs that are required for the controller and then
+```shell
+go run ./cmd/platform-service-dns/main.go run --environment default --provider-name dns --kubeconfig path/to/kubeconfig
+```
+
+Note that a `DNSServiceConfig` resources is required for the platform service. See the [documentation](docs/README.md) for further details regarding resources and configuration.
 
 ## Support, Feedback, Contributing
 
