@@ -32,8 +32,9 @@ func NewPlatformServiceDNSCommand() *cobra.Command {
 }
 
 type RawSharedOptions struct {
-	Environment string `json:"environment"`
-	DryRun      bool   `json:"dry-run"`
+	Environment  string `json:"environment"`
+	ProviderName string `json:"provider-name"`
+	DryRun       bool   `json:"dry-run"`
 }
 
 type SharedOptions struct {
@@ -41,8 +42,7 @@ type SharedOptions struct {
 	PlatformCluster *clusters.Cluster
 
 	// fields filled in Complete()
-	Log          logging.Logger
-	ProviderName string
+	Log logging.Logger
 }
 
 func (o *SharedOptions) AddPersistentFlags(cmd *cobra.Command) {
@@ -52,6 +52,8 @@ func (o *SharedOptions) AddPersistentFlags(cmd *cobra.Command) {
 	o.PlatformCluster.RegisterSingleConfigPathFlag(cmd.PersistentFlags())
 	// environment
 	cmd.PersistentFlags().StringVar(&o.Environment, "environment", "", "Environment name. Required. This is used to distinguish between different environments that are watching the same Onboarding cluster. Must be globally unique.")
+	// provider name
+	cmd.PersistentFlags().StringVar(&o.ProviderName, "provider-name", "", "Name of the provider resource.")
 	cmd.PersistentFlags().BoolVar(&o.DryRun, "dry-run", false, "If set, the command aborts after evaluation of the given flags.")
 }
 
@@ -59,10 +61,8 @@ func (o *SharedOptions) Complete() error {
 	if o.Environment == "" {
 		return fmt.Errorf("environment must not be empty")
 	}
-
-	o.ProviderName = os.Getenv("OPENMCP_PROVIDER_NAME")
 	if o.ProviderName == "" {
-		o.ProviderName = "gardener"
+		return fmt.Errorf("provider-name must not be empty")
 	}
 
 	// build logger

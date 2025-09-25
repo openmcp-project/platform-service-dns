@@ -1,0 +1,29 @@
+purposeSelector:
+  and:
+    - not:
+        and:
+        - name: foo
+        - name: bar
+    - or:
+      - name: foo
+      - name: bar
+
+purposeSets:
+  a:
+  - foo
+  b:
+  - bar
+  - foo
+  c:
+  - foo
+  - foo
+  d: []
+  e:
+  - bar
+  f:
+  - foobar
+
+expected:
+- a
+- c
+- e

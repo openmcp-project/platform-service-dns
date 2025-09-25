@@ -1,0 +1,19 @@
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns-service
+spec:
+  externalDNSSource:
+    git:
+      url: "https://example.org/repo/charts"
+      interval: 10m
+  externalDNSForPurposes:
+  - name: foo
+    purposeSelector:
+      name: foo
+    helmValues:
+      providerNamespace: <provider.namespace>
+      providerName: <provider.name>
+      environment: <environment>
+      clusterNamespace: <cluster.namespace>
+      clusterName: <cluster.name>

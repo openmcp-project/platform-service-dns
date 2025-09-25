@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   labels:
     openmcp.cloud/cluster: platform
   name: dnsserviceconfigs.dns.openmcp.cloud
@@ -53,9 +53,21 @@ spec:
                   description: ExternalDNSPurposeConfig holds a purpose selector and
                     the DNS configuration to apply if the selector matches.
                   properties:
-                    config:
-                      description: HelmValues are the helm values to deploy external-dns
-                        with, if the purpose selector matches.
+                    helmReleaseReconciliationInterval:
+                      description: |-
+                        HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+                        If not set, the global HelmReleaseReconciliationInterval is used.
+                      type: string
+                    helmValues:
+                      description: |-
+                        HelmValues are the helm values to deploy external-dns with, if the purpose selector matches.
+                        There are a few special strings which will be replaced before creating the HelmRelease:
+                        - <provider.name> will be replaced with the provider name resource.
+                        - <provider.namespace> will be replaced with the namespace that hosts the platform service.
+                        - <environment> will be replaced with the environment name of the operator.
+                        - <cluster.name> will be replaced with the name of the reconciled Cluster.
+                        - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
+                      type: string
                     name:
                       description: |-
                         Name is an optional name.
@@ -67,65 +79,33 @@ spec:
                         If not set, all Clusters are matched.
                       properties:
                         and:
-                          items: {}
+                          items:
+                            type: object
                           type: array
                         name:
                           type: string
-                        not: {}
+                        not:
+                          type: object
                         or:
-                          items: {}
+                          items:
+                            type: object
                           type: array
                       type: object
-                      x-kubernetes-validations:
-                      - message: Exactly one of 'and', 'or', 'not' or 'name' must
-                          be set
-                        rule: size(self.filter(property, size(self[property]) > 0))
-                          == 1
                   required:
-                  - config
+                  - helmValues
                   type: object
                 type: array
               externalDNSSource:
                 description: ExternalDNSSource is the source of the external-dns helm
                   chart.
                 properties:
-                  copyAuthSecret:
+                  chartName:
                     description: |-
-                      SecretCopy defines the name of the secret to copy and the name of the copied secret.
-                      If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
-                    properties:
-                      source:
-                        description: ObjectReference is a reference to an object in
-                          any namespace.
-                        properties:
-                          name:
-                            description: Name is the name of the object.
-                            type: string
-                          namespace:
-                            description: Namespace is the namespace of the object.
-                            type: string
-                        required:
-                        - name
-                        - namespace
-                        type: object
-                      target:
-                        description: ObjectReference is a reference to an object in
-                          any namespace.
-                        properties:
-                          name:
-                            description: Name is the name of the object.
-                            type: string
-                          namespace:
-                            description: Namespace is the namespace of the object.
-                            type: string
-                        required:
-                        - name
-                        - namespace
-                        type: object
-                    required:
-                    - source
-                    - target
-                    type: object
+                      ChartName specifies the name of the external-dns chart.
+                      Depending on the source, this can also be a relative path within the repository.
+                      When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
+                    minLength: 1
+                    type: string
                   git:
                     description: |-
                       GitRepositorySpec specifies the required configuration to produce an
@@ -648,59 +628,63 @@ spec:
                     - interval
                     - url
                     type: object
+                required:
+                - chartName
                 type: object
                 x-kubernetes-validations:
-                - message: Exactly one of 'helm', 'git', or 'oci' must be set
-                  rule: size(self.filter(property, (property != "copyAuthSecret")
-                    && (size(self[property]) > 0))) == 1
-              selector:
+                - message: exactly one of the fields in [helm git oci] must be set
+                  rule: '[has(self.helm),has(self.git),has(self.oci)].filter(x,x==true).size()
+                    == 1'
+              helmReleaseReconciliationInterval:
                 description: |-
-                  Selector is a label selector.
-                  If not nil, only Clusters that match the selector will be reconciled by the controller.
-                properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
+                  HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
+                  The value can be overwritten for specific purposes using ExternalDNSForPurposes.
+                  If not set, a default of 1h is used.
+                type: string
+              secretsToCopy:
+                description: |-
+                  SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
+                  This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
+                items:
+                  description: |-
+                    SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                    If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
+                  properties:
+                    source:
+                      description: LocalObjectReference is a reference to an object
+                        in the same namespace as the resource referencing it.
                       properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
+                        name:
+                          default: ""
                           description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                           type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
                       type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
+                      x-kubernetes-map-type: atomic
+                    target:
+                      description: LocalObjectReference is a reference to an object
+                        in the same namespace as the resource referencing it.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - source
+                  - target
+                  type: object
+                type: array
             required:
             - externalDNSSource
             type: object

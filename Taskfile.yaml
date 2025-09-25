@@ -12,7 +12,7 @@ includes:
       CODE_DIRS: '{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/...'
       COMPONENTS: platform-service-dns
       REPO_URL: 'https://github.com/openmcp-project/platform-service-dns'
-      GENERATE_DOCS_INDEX: "false"
+      GENERATE_DOCS_INDEX: "true"
       CHART_COMPONENTS: "[]"
       CRDS_COMPONENTS: platform-service-dns
       CRDS_PATH: '{{.ROOT_DIR}}/api/crds/manifests'

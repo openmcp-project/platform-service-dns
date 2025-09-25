@@ -1,0 +1,13 @@
+apiVersion: clusters.openmcp.cloud/v1alpha1
+kind: Cluster
+metadata:
+  name: cluster-01
+  namespace: foo
+spec:
+  kubernetes: {}
+  profile: my-profile
+  purposes:
+  - foo
+  - bar
+  - foobar
+  tenancy: Shared

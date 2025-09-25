@@ -1,0 +1,29 @@
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns-service
+spec:
+  externalDNSSource:
+    oci:
+      url: "oci://example.org/repo/charts"
+      interval: 10m
+  externalDNSForPurposes:
+  - name: complex
+    purposeSelector:
+      and:
+      - or:
+        - name: foo
+        - name: bar
+      - not:
+          and:
+          - name: foo
+          - name: bar
+    helmValues:
+      foo: baz
+  - name: foobar
+    purposeSelector:
+      and:
+      - name: foo
+      - name: foobar
+    helmValues:
+      foo: foo

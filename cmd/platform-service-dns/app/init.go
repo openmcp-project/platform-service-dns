@@ -5,9 +5,14 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	// crdutil "github.com/openmcp-project/controller-utils/pkg/crds"
-	// clustersv1alpha1 "github.com/openmcp-project/platform-service-dns/api/clusters/v1alpha1"
-	// openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	crdutil "github.com/openmcp-project/controller-utils/pkg/crds"
+	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
+
+	"github.com/openmcp-project/platform-service-dns/api/crds"
+	providerscheme "github.com/openmcp-project/platform-service-dns/api/install"
 )
 
 func NewInitCommand(so *SharedOptions) *cobra.Command {
@@ -52,21 +57,20 @@ func (o *InitOptions) Complete(ctx context.Context) error {
 }
 
 func (o *InitOptions) Run(ctx context.Context) error {
-	// if err := o.PlatformCluster.InitializeClient(providerscheme.InstallCRDAPIs(runtime.NewScheme())); err != nil {
-	// 	return err
-	// }
+	if err := o.PlatformCluster.InitializeClient(providerscheme.InstallCRDAPIs(runtime.NewScheme())); err != nil {
+		return err
+	}
 
 	log := o.Log.WithName("main")
 	log.Info("Environment", "value", o.Environment)
 	log.Info("ProviderName", "value", o.ProviderName)
 
 	// apply CRDs
-	// TODO: are CRDs required?
-	// crdManager := crdutil.NewCRDManager(openmcpconst.ClusterLabel, crds.CRDs)
-	// crdManager.AddCRDLabelToClusterMapping(clustersv1alpha1.PURPOSE_PLATFORM, o.PlatformCluster)
-	// if err := crdManager.CreateOrUpdateCRDs(ctx, &log); err != nil {
-	// 	return fmt.Errorf("error creating/updating CRDs: %w", err)
-	// }
+	crdManager := crdutil.NewCRDManager(openmcpconst.ClusterLabel, crds.CRDs)
+	crdManager.AddCRDLabelToClusterMapping(clustersv1alpha1.PURPOSE_PLATFORM, o.PlatformCluster)
+	if err := crdManager.CreateOrUpdateCRDs(ctx, &log); err != nil {
+		return fmt.Errorf("error creating/updating CRDs: %w", err)
+	}
 
 	log.Info("Finished init command")
 	return nil
