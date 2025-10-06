@@ -80,8 +80,9 @@ type ExternalDNSPurposeConfig struct {
 	// - <environment> will be replaced with the environment name of the operator.
 	// - <cluster.name> will be replaced with the name of the reconciled Cluster.
 	// - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
-	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Type=object
 	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	HelmValues *apiextensionsv1.JSON `json:"helmValues"`
 }
 

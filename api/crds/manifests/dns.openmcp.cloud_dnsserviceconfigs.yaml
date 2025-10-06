@@ -67,7 +67,8 @@ spec:
                         - <environment> will be replaced with the environment name of the operator.
                         - <cluster.name> will be replaced with the name of the reconciled Cluster.
                         - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
-                      type: string
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     name:
                       description: |-
                         Name is an optional name.
