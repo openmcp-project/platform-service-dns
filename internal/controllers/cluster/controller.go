@@ -533,6 +533,7 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		// release information
 		hr.Spec.ReleaseName = "external-dns"
 		hr.Spec.TargetNamespace = "external-dns"
+		hr.Spec.StorageNamespace = hr.Spec.TargetNamespace
 		// values
 		values := string(rr.Config.HelmValues.Raw)
 		// at some point '<' and '>' get escaped and we have to match the escaped version here
