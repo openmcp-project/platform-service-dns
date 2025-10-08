@@ -276,10 +276,6 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 			return rr
 		}
 		rr.Access = clusters.New(ar.Name).WithRESTConfig(rest)
-		if err := rr.Access.InitializeRESTConfig(); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-			return rr
-		}
 		if err := rr.Access.InitializeClient(nil); err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing client for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
 			return rr
