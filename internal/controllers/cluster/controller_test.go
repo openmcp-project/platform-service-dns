@@ -149,7 +149,10 @@ var _ = Describe("ClusterReconciler", func() {
 				"Data": Equal(map[string][]byte{"foo": []byte("bar")}),
 			}),
 		))
-
+		// namespace on target cluster
+		ns := &corev1.Namespace{}
+		ns.Name = cluster.TargetClusterNamespace
+		Expect(rec.FakeClientMappings["foo/cluster-01"].Get(env.Ctx, client.ObjectKeyFromObject(ns), ns)).To(Succeed())
 		// copied secrets on target cluster
 		Expect(rec.FakeClientMappings["foo/cluster-01"].List(env.Ctx, ss, client.InNamespace(cluster.TargetClusterNamespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(ss.Items).To(ConsistOf(
@@ -233,6 +236,8 @@ var _ = Describe("ClusterReconciler", func() {
 				"Data": Equal(map[string][]byte{"foo": []byte("bar")}),
 			}),
 		))
+		// namespace on target cluster
+		Expect(rec.FakeClientMappings["bar/cluster-02"].Get(env.Ctx, client.ObjectKeyFromObject(ns), ns)).To(Succeed())
 		// copied secrets on target cluster
 		Expect(rec.FakeClientMappings["bar/cluster-02"].List(env.Ctx, ss, client.InNamespace(cluster.TargetClusterNamespace), client.MatchingLabels(expectedLabels))).To(Succeed())
 		Expect(ss.Items).To(ConsistOf(
