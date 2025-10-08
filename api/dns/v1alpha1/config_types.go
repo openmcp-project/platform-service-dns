@@ -16,10 +16,10 @@ type DNSServiceConfigSpec struct {
 	// ExternalDNSSource is the source of the external-dns helm chart.
 	ExternalDNSSource ExternalDNSSource `json:"externalDNSSource"`
 
-	// SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
-	// This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
+	// SecretsToCopy specifies secrets that should be copied to either the cluster's namespace on the platform cluster,
+	// or the namespace on the target cluster where the helm chart will be installed into.
 	// +optional
-	SecretsToCopy []SecretCopy `json:"secretsToCopy,omitempty"`
+	SecretsToCopy *SecretsToCopy `json:"secretsToCopy,omitempty"`
 
 	// HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
 	// The value can be overwritten for specific purposes using ExternalDNSForPurposes.
@@ -32,6 +32,17 @@ type DNSServiceConfigSpec struct {
 	// If no selector matches, no configuration will be applied.
 	// +optional
 	ExternalDNSForPurposes []ExternalDNSPurposeConfig `json:"externalDNSForPurposes,omitempty"`
+}
+
+type SecretsToCopy struct {
+	// ToPlatformCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the platform cluster.
+	// This is useful e.g. for pull secrets for the helm chart registry.
+	// +optional
+	ToPlatformCluster []SecretCopy `json:"toPlatformCluster,omitempty"`
+	// ToTargetCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the target cluster.
+	// This allows propagating secrets that are required by the helm chart to the target cluster.
+	// +optional
+	ToTargetCluster []SecretCopy `json:"toTargetCluster,omitempty"`
 }
 
 // ExternalDNSSource defines the source of the external-dns helm chart in form of a Flux source.

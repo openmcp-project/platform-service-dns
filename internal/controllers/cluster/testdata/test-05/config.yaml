@@ -7,17 +7,6 @@ spec:
     toPlatformCluster:
     - source:
         name: my-auth
-      target:
-        name: my-auth-copy
-    - source:
-        name: my-other-secret
-    toTargetCluster:
-    - source:
-        name: my-target-secret
-      target:
-        name: my-target-secret-copy
-    - source:
-        name: my-other-secret
   externalDNSSource:
     oci:
       url: "oci://example.org/repo/charts"

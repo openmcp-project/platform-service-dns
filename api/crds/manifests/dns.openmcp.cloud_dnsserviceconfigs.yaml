@@ -654,48 +654,98 @@ spec:
                 type: string
               secretsToCopy:
                 description: |-
-                  SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
-                  This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
-                items:
-                  description: |-
-                    SecretCopy defines the name of the secret to copy and the name of the copied secret.
-                    If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
-                  properties:
-                    source:
-                      description: LocalObjectReference is a reference to an object
-                        in the same namespace as the resource referencing it.
+                  SecretsToCopy specifies secrets that should be copied to either the cluster's namespace on the platform cluster,
+                  or the namespace on the target cluster where the helm chart will be installed into.
+                properties:
+                  toPlatformCluster:
+                    description: |-
+                      ToPlatformCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the platform cluster.
+                      This is useful e.g. for pull secrets for the helm chart registry.
+                    items:
+                      description: |-
+                        SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                        If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
-                        name:
-                          default: ""
-                          description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          type: string
+                        source:
+                          description: LocalObjectReference is a reference to an object
+                            in the same namespace as the resource referencing it.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        target:
+                          description: LocalObjectReference is a reference to an object
+                            in the same namespace as the resource referencing it.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - source
+                      - target
                       type: object
-                      x-kubernetes-map-type: atomic
-                    target:
-                      description: LocalObjectReference is a reference to an object
-                        in the same namespace as the resource referencing it.
+                    type: array
+                  toTargetCluster:
+                    description: |-
+                      ToTargetCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the target cluster.
+                      This allows propagating secrets that are required by the helm chart to the target cluster.
+                    items:
+                      description: |-
+                        SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                        If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
-                        name:
-                          default: ""
-                          description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          type: string
+                        source:
+                          description: LocalObjectReference is a reference to an object
+                            in the same namespace as the resource referencing it.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        target:
+                          description: LocalObjectReference is a reference to an object
+                            in the same namespace as the resource referencing it.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - source
+                      - target
                       type: object
-                      x-kubernetes-map-type: atomic
-                  required:
-                  - source
-                  - target
-                  type: object
-                type: array
+                    type: array
+                type: object
             required:
             - externalDNSSource
             type: object
