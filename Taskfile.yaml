@@ -16,3 +16,25 @@ includes:
       CHART_COMPONENTS: "[]"
       CRDS_COMPONENTS: platform-service-dns
       CRDS_PATH: '{{.ROOT_DIR}}/api/crds/manifests'
+
+tasks:
+  platformservice:
+    desc: "  Generates a PlatformService manifest for the current version. Set the VERBOSITY env var to overwrite the default verbosity level (INFO)."
+    requires:
+      vars:
+      - VERSION
+    vars:
+      VERBOSITY:
+        sh: echo "${VERBOSITY:-INFO}"
+    cmds:
+    - cmd: |
+        cat << EOF
+        apiVersion: openmcp.cloud/v1alpha1
+        kind: PlatformService
+        metadata:
+          name: dns
+        spec:
+          image: ghcr.io/openmcp-project/images/platform-service-dns:{{.VERSION}}
+          verbosity: {{.VERBOSITY}}
+        EOF
+      silent: true
