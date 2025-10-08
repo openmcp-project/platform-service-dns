@@ -63,7 +63,12 @@ type ExternalDNSSource struct {
 // SecretCopy defines the name of the secret to copy and the name of the copied secret.
 // If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
 type SecretCopy struct {
-	Source commonapi.LocalObjectReference  `json:"source"`
+	// Source references the source secret to copy.
+	// It has to be in the namespace the provider pod is running in.
+	Source commonapi.LocalObjectReference `json:"source"`
+	// Target is the name of the copied secret.
+	// If not set, the secret will be copied with the same name as the source secret.
+	// +optional
 	Target *commonapi.LocalObjectReference `json:"target"`
 }
 

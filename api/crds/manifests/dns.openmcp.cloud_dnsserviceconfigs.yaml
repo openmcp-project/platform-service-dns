@@ -667,8 +667,9 @@ spec:
                         If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
                         source:
-                          description: LocalObjectReference is a reference to an object
-                            in the same namespace as the resource referencing it.
+                          description: |-
+                            Source references the source secret to copy.
+                            It has to be in the namespace the provider pod is running in.
                           properties:
                             name:
                               default: ""
@@ -682,8 +683,9 @@ spec:
                           type: object
                           x-kubernetes-map-type: atomic
                         target:
-                          description: LocalObjectReference is a reference to an object
-                            in the same namespace as the resource referencing it.
+                          description: |-
+                            Target is the name of the copied secret.
+                            If not set, the secret will be copied with the same name as the source secret.
                           properties:
                             name:
                               default: ""
@@ -698,7 +700,6 @@ spec:
                           x-kubernetes-map-type: atomic
                       required:
                       - source
-                      - target
                       type: object
                     type: array
                   toTargetCluster:
@@ -711,8 +712,9 @@ spec:
                         If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
                         source:
-                          description: LocalObjectReference is a reference to an object
-                            in the same namespace as the resource referencing it.
+                          description: |-
+                            Source references the source secret to copy.
+                            It has to be in the namespace the provider pod is running in.
                           properties:
                             name:
                               default: ""
@@ -726,8 +728,9 @@ spec:
                           type: object
                           x-kubernetes-map-type: atomic
                         target:
-                          description: LocalObjectReference is a reference to an object
-                            in the same namespace as the resource referencing it.
+                          description: |-
+                            Target is the name of the copied secret.
+                            If not set, the secret will be copied with the same name as the source secret.
                           properties:
                             name:
                               default: ""
@@ -742,7 +745,6 @@ spec:
                           x-kubernetes-map-type: atomic
                       required:
                       - source
-                      - target
                       type: object
                     type: array
                 type: object
