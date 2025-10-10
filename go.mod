@@ -9,8 +9,8 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.12.0
 	github.com/fluxcd/source-controller/api v1.6.2
 	github.com/openmcp-project/controller-utils v0.23.1
-	github.com/openmcp-project/openmcp-operator/api v0.14.0
-	github.com/openmcp-project/openmcp-operator/lib v0.14.1-0.20250918113839-de9cd0290162
+	github.com/openmcp-project/openmcp-operator/api v0.15.1
+	github.com/openmcp-project/openmcp-operator/lib v0.15.1
 	github.com/openmcp-project/platform-service-dns/api v0.0.1
 	github.com/spf13/cobra v1.10.1
 	k8s.io/api v0.34.1
