@@ -563,7 +563,7 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		hr.Spec.Upgrade.Remediation.Retries = 3
 		// reference Cluster kubeconfig
 		hr.Spec.KubeConfig = &fluxmeta.KubeConfigReference{
-			SecretRef: fluxmeta.SecretKeyReference{
+			SecretRef: &fluxmeta.SecretKeyReference{
 				Name: rr.AccessRequest.Status.SecretRef.Name,
 				Key:  clustersv1alpha1.SecretKeyKubeconfig,
 			},
