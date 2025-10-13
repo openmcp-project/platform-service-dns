@@ -49,11 +49,13 @@ type SecretsToCopy struct {
 // Exactly one of 'HelmRepository', 'GitRepository' or 'OCIRepository' must be set.
 // If 'copyAuthSecret' is set, the referenced source secret is copied into the namespace where the Flux resources are created with the specified target name.
 // +kubebuilder:validation:ExactlyOneOf=helm;git;oci
+// +kubebuilder:validation:XValidation:rule="(has(self.git) || has(self.helm)) ? (has(self.chartName) && size(self.chartName) > 0) : true", message="chartName must be set if git is used as source"
 type ExternalDNSSource struct {
 	// ChartName specifies the name of the external-dns chart.
-	// Depending on the source, this can also be a relative path within the repository.
-	// When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
-	// +kubebuilder:validation:MinLength=1
+	// Can be omitted for oci sources, required for git and helm sources.
+	// For git sources, this is the path within the git repository to the chart.
+	// For helm sources, append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
+	// +optional
 	ChartName string                     `json:"chartName"`
 	Helm      *fluxv1.HelmRepositorySpec `json:"helm,omitempty"`
 	Git       *fluxv1.GitRepositorySpec  `json:"git,omitempty"`

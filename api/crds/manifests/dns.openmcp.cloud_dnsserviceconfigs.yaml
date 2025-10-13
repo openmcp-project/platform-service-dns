@@ -103,9 +103,9 @@ spec:
                   chartName:
                     description: |-
                       ChartName specifies the name of the external-dns chart.
-                      Depending on the source, this can also be a relative path within the repository.
-                      When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
-                    minLength: 1
+                      Can be omitted for oci sources, required for git and helm sources.
+                      For git sources, this is the path within the git repository to the chart.
+                      For helm sources, append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
                     type: string
                   git:
                     description: |-
@@ -639,10 +639,11 @@ spec:
                     - interval
                     - url
                     type: object
-                required:
-                - chartName
                 type: object
                 x-kubernetes-validations:
+                - message: chartName must be set if git is used as source
+                  rule: '(has(self.git) || has(self.helm)) ? (has(self.chartName)
+                    && size(self.chartName) > 0) : true'
                 - message: exactly one of the fields in [helm git oci] must be set
                   rule: '[has(self.helm),has(self.git),has(self.oci)].filter(x,x==true).size()
                     == 1'

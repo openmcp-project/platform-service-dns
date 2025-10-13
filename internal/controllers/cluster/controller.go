@@ -47,9 +47,15 @@ import (
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 )
 
-const ControllerName = "DNSCluster"
-const defaultRequeueAfterDuration = 30 * time.Second
-const TargetClusterNamespace = "external-dns"
+const (
+	ControllerName              = "DNSCluster"
+	defaultRequeueAfterDuration = 30 * time.Second
+	TargetClusterNamespace      = "external-dns"
+
+	SourceKindHelmRepository = "HelmRepository"
+	SourceKindGitRepository  = "GitRepository"
+	SourceKindOCIRepository  = "OCIRepository"
+)
 
 type ClusterReconciler struct {
 	PlatformCluster    *clusters.Cluster
@@ -558,7 +564,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			helmRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Helm.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "HelmRepository"
+		rr.SourceKind = SourceKindHelmRepository
 		for i := range existingHelm.Items {
 			obj := &existingHelm.Items[i]
 			if obj.GetName() != sourceName {
@@ -577,7 +583,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			gitRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Git.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "GitRepository"
+		rr.SourceKind = SourceKindGitRepository
 		for i := range existingGit.Items {
 			obj := &existingGit.Items[i]
 			if obj.GetName() != sourceName {
@@ -596,7 +602,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			ociRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.OCI.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "OCIRepository"
+		rr.SourceKind = SourceKindOCIRepository
 		for i := range existingOCI.Items {
 			obj := &existingOCI.Items[i]
 			if obj.GetName() != sourceName {
@@ -655,20 +661,31 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		// labels
 		hr.Labels = maputils.Merge(hr.Labels, expectedLabels)
 		// chart
-		hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
-			Spec: fluxhelmv2.HelmChartTemplateSpec{
-				SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
-					APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
-					Kind:       rr.SourceKind,
-					Name:       hr.Name,
-					Namespace:  hr.Namespace,
+		if rr.SourceKind == SourceKindOCIRepository {
+			hr.Spec.Chart = nil
+			hr.Spec.ChartRef = &fluxhelmv2.CrossNamespaceSourceReference{
+				APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+				Kind:       rr.SourceKind,
+				Name:       hr.Name,
+				Namespace:  hr.Namespace,
+			}
+		} else {
+			hr.Spec.ChartRef = nil
+			hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
+				Spec: fluxhelmv2.HelmChartTemplateSpec{
+					SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
+						APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+						Kind:       rr.SourceKind,
+						Name:       hr.Name,
+						Namespace:  hr.Namespace,
+					},
 				},
-			},
-		}
-		chartNameVersion := strings.Split(rr.ProviderConfig.Spec.ExternalDNSSource.ChartName, "@")
-		hr.Spec.Chart.Spec.Chart = chartNameVersion[0]
-		if len(chartNameVersion) > 1 {
-			hr.Spec.Chart.Spec.Version = chartNameVersion[1]
+			}
+			chartNameVersion := strings.Split(rr.ProviderConfig.Spec.ExternalDNSSource.ChartName, "@")
+			hr.Spec.Chart.Spec.Chart = chartNameVersion[0]
+			if len(chartNameVersion) > 1 {
+				hr.Spec.Chart.Spec.Version = chartNameVersion[1]
+			}
 		}
 		// release information
 		hr.Spec.ReleaseName = "external-dns"
@@ -797,19 +814,19 @@ func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clus
 	toBeDeleted := []client.Object{}
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingHelm.Items, func(obj fluxsourcev1.HelmRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "HelmRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindHelmRepository})
 		}
 		return &obj
 	})...)
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingGit.Items, func(obj fluxsourcev1.GitRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "GitRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindGitRepository})
 		}
 		return &obj
 	})...)
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingOCI.Items, func(obj fluxsourcev1.OCIRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "OCIRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindOCIRepository})
 		}
 		return &obj
 	})...)
