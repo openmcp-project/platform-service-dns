@@ -119,3 +119,101 @@ purposeSelector:
     name: foo
 ```
 Matches all `Cluster` resources that do not have `foo` in their purpose list.
+
+### Configuration Examples
+
+All examples below use a purpose selector that matches all `Cluster` resources which have `test` among their purposes.
+
+###### Example 1 - Git Repo with DNS Secret
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  secretsToCopy:
+    toTargetCluster:
+    - source:
+        name: route53-access
+
+  externalDNSSource:
+    chartName: charts/external-dns
+    git:
+      url: https://github.com/kubernetes-sigs/external-dns
+      interval: 1h
+      ref:
+        tag: v0.19.0
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues:
+      provider:
+        name: aws
+      env:
+      - name: AWS_DEFAULT_REGION
+        value: eu-central-1
+      extraVolumes:
+      - name: aws-credentials
+        secret:
+          secretName: route53-access
+      extraVolumeMounts:
+      - name: aws-credentials
+        mountPath: /.aws
+        readOnly: true
+```
+
+###### Example 2 - OCI Repo with Auth Secret
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  secretsToCopy:
+    toPlatformCluster:
+    - source:
+        name: ghcr-access
+
+  externalDNSSource:
+    oci:
+      url: oci://ghcr.io/my-user/external-dns
+      interval: 1h
+      ref:
+        tag: "1.19.0"
+      secretRef:
+        name: ghcr-access
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues: {}
+```
+
+###### Example 3 - Helm Repo
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  externalDNSSource:
+    chartName: external-dns@1.19.0
+    helm:
+      url: https://kubernetes-sigs.github.io/external-dns/
+      interval: 1h
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues: {}
+```
