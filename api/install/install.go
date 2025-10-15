@@ -10,6 +10,7 @@ import (
 	fluxsourcev1 "github.com/fluxcd/source-controller/api/v1"
 
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
 
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 )
@@ -27,6 +28,7 @@ func InstallOperatorAPIsPlatform(scheme *runtime.Scheme) *runtime.Scheme {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(dnsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(clustersv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(providerv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(fluxsourcev1.AddToScheme(scheme))
 	utilruntime.Must(fluxhelmv2.AddToScheme(scheme))
 

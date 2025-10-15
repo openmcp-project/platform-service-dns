@@ -42,6 +42,7 @@ import (
 	clusterconst "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1/constants"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
 	accesslib "github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
 
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
@@ -99,6 +100,8 @@ type ReconcileResult struct {
 	Message string
 	// ProviderConfig is the complete provider configuration.
 	ProviderConfig *dnsv1alpha1.DNSServiceConfig
+	// PlatformService is the DNS PlatformService resource.
+	PlatformService *providerv1alpha1.PlatformService
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -171,6 +174,13 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, c *clustersv1alpha1.C
 		} else {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting DNSServiceConfig '%s': %w", rr.ProviderConfig.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 		}
+		return rr
+	}
+	// load PlatformService resource
+	rr.PlatformService = &providerv1alpha1.PlatformService{}
+	rr.PlatformService.Name = r.ProviderName
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(rr.PlatformService), rr.PlatformService); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting PlatformService '%s': %w", rr.PlatformService.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 		return rr
 	}
 
@@ -450,64 +460,74 @@ func (r *ClusterReconciler) copySecrets(ctx context.Context, namespace string, e
 
 	// copy secrets if configured
 	if rr.ProviderConfig.Spec.SecretsToCopy != nil {
-		var secretsToCopy []dnsv1alpha1.SecretCopy
+		var configuredSecretsToCopy []dnsv1alpha1.SecretCopy
 		var targetAccess client.Client
 		var interactionProblemReason string
 		switch copyTarget {
 		case platformClusterCopy:
-			secretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToPlatformCluster
+			configuredSecretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToPlatformCluster
 			targetAccess = r.PlatformCluster.Client()
 			interactionProblemReason = clusterconst.ReasonPlatformClusterInteractionProblem
 		case targetClusterCopy:
-			secretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToTargetCluster
+			configuredSecretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToTargetCluster
 			targetAccess = rr.Access.Client()
 			interactionProblemReason = dnsv1alpha1.ReasonTargetClusterInteractionProblem
+		}
+		secretsToCopy := map[string]string{}
+		for _, ips := range rr.PlatformService.Spec.ImagePullSecrets {
+			secretsToCopy[ips.Name] = ips.Name
+		}
+		for _, sc := range configuredSecretsToCopy {
+			tName := ""
+			if sc.Target != nil && sc.Target.Name != "" {
+				tName = sc.Target.Name
+			} else {
+				tName = sc.Source.Name
+			}
+			secretsToCopy[sc.Source.Name] = tName
 		}
 		if targetAccess == nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("no access to cluster '%s' for copying secrets", copyTarget), clusterconst.ReasonInternalError)
 			return rr, copied
 		}
-		for i, stc := range secretsToCopy {
+		for sourceName, targetName := range secretsToCopy {
 			source := &corev1.Secret{}
-			source.Name = stc.Source.Name
+			source.Name = sourceName
 			source.Namespace = r.ProviderNamespace
-			log.Debug("Secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name, "index", i)
+			log.Debug("Secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name)
 			if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(source), source); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s' (index: %d): %w", source.Namespace, source.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s': %w", source.Namespace, source.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 				return rr, copied
 			}
 
 			// check if target secret already exists
 			target := &corev1.Secret{}
-			target.Name = source.Name
-			if stc.Target != nil && stc.Target.Name != "" {
-				target.Name = stc.Target.Name
-			}
+			target.Name = targetName
 			target.Namespace = namespace
 			if copyTarget == platformClusterCopy && target.Namespace == source.Namespace && target.Name == source.Name {
-				log.Debug("Skipping copying of secret because source and target are identical", "secretNamespace", target.Namespace, "secretName", target.Name, "index", i)
+				log.Debug("Skipping copying of secret because source and target are identical", "secretNamespace", target.Namespace, "secretName", target.Name)
 				copied.Insert(target.Name)
 				continue
 			}
 			targetExists := true
 			if err := targetAccess.Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
 				if !apierrors.IsNotFound(err) {
-					rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), interactionProblemReason)
+					rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s': %w", target.Namespace, target.Name, err), interactionProblemReason)
 					return rr, copied
 				}
 				targetExists = false
 			}
 			if targetExists {
 				// if target secret exists, verify that it is managed by us
-				log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
+				log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name)
 				for k, v := range expectedLabels {
 					if v2, ok := target.Labels[k]; !ok || v2 != v {
-						rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' (index: %d) already exists and is not managed by %s controller", target.Namespace, target.Name, i, ControllerName), clusterconst.ReasonConfigurationProblem)
+						rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' already exists and is not managed by %s controller", target.Namespace, target.Name, ControllerName), clusterconst.ReasonConfigurationProblem)
 						return rr, copied
 					}
 				}
 			}
-			log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
+			log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name)
 			if _, err := controllerutil.CreateOrUpdate(ctx, targetAccess, target, func() error {
 				target.Labels = maputils.Merge(target.Labels, source.Labels, expectedLabels)
 				target.Annotations = maputils.Merge(target.Annotations, source.Annotations)
@@ -516,7 +536,7 @@ func (r *ClusterReconciler) copySecrets(ctx context.Context, namespace string, e
 				target.Type = source.Type
 				return nil
 			}); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), interactionProblemReason)
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s': %w", target.Namespace, target.Name, err), interactionProblemReason)
 				return rr, copied
 			}
 			copied.Insert(target.Name)
