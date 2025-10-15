@@ -67,7 +67,8 @@ spec:
                         - <environment> will be replaced with the environment name of the operator.
                         - <cluster.name> will be replaced with the name of the reconciled Cluster.
                         - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
-                      type: string
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     name:
                       description: |-
                         Name is an optional name.
@@ -102,9 +103,9 @@ spec:
                   chartName:
                     description: |-
                       ChartName specifies the name of the external-dns chart.
-                      Depending on the source, this can also be a relative path within the repository.
-                      When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
-                    minLength: 1
+                      Can be omitted for oci sources, required for git and helm sources.
+                      For git sources, this is the path within the git repository to the chart.
+                      For helm sources, append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
                     type: string
                   git:
                     description: |-
@@ -638,10 +639,11 @@ spec:
                     - interval
                     - url
                     type: object
-                required:
-                - chartName
                 type: object
                 x-kubernetes-validations:
+                - message: chartName must be set if git is used as source
+                  rule: '(has(self.git) || has(self.helm)) ? (has(self.chartName)
+                    && size(self.chartName) > 0) : true'
                 - message: exactly one of the fields in [helm git oci] must be set
                   rule: '[has(self.helm),has(self.git),has(self.oci)].filter(x,x==true).size()
                     == 1'
@@ -653,48 +655,100 @@ spec:
                 type: string
               secretsToCopy:
                 description: |-
-                  SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
-                  This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
-                items:
-                  description: |-
-                    SecretCopy defines the name of the secret to copy and the name of the copied secret.
-                    If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
-                  properties:
-                    source:
-                      description: LocalObjectReference is a reference to an object
-                        in the same namespace as the resource referencing it.
+                  SecretsToCopy specifies secrets that should be copied to either the cluster's namespace on the platform cluster,
+                  or the namespace on the target cluster where the helm chart will be installed into.
+                properties:
+                  toPlatformCluster:
+                    description: |-
+                      ToPlatformCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the platform cluster.
+                      This is useful e.g. for pull secrets for the helm chart registry.
+                    items:
+                      description: |-
+                        SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                        If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
-                        name:
-                          default: ""
+                        source:
                           description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          type: string
+                            Source references the source secret to copy.
+                            It has to be in the namespace the provider pod is running in.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        target:
+                          description: |-
+                            Target is the name of the copied secret.
+                            If not set, the secret will be copied with the same name as the source secret.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - source
                       type: object
-                      x-kubernetes-map-type: atomic
-                    target:
-                      description: LocalObjectReference is a reference to an object
-                        in the same namespace as the resource referencing it.
+                    type: array
+                  toTargetCluster:
+                    description: |-
+                      ToTargetCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the target cluster.
+                      This allows propagating secrets that are required by the helm chart to the target cluster.
+                    items:
+                      description: |-
+                        SecretCopy defines the name of the secret to copy and the name of the copied secret.
+                        If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
                       properties:
-                        name:
-                          default: ""
+                        source:
                           description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          type: string
+                            Source references the source secret to copy.
+                            It has to be in the namespace the provider pod is running in.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        target:
+                          description: |-
+                            Target is the name of the copied secret.
+                            If not set, the secret will be copied with the same name as the source secret.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                      - source
                       type: object
-                      x-kubernetes-map-type: atomic
-                  required:
-                  - source
-                  - target
-                  type: object
-                type: array
+                    type: array
+                type: object
             required:
             - externalDNSSource
             type: object

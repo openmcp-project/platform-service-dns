@@ -16,10 +16,10 @@ type DNSServiceConfigSpec struct {
 	// ExternalDNSSource is the source of the external-dns helm chart.
 	ExternalDNSSource ExternalDNSSource `json:"externalDNSSource"`
 
-	// SecretsToCopy specifies an optional list of secrets which will be copied from the provider namespace into the namespaces of the reconciled Clusters.
-	// This can, for example, be used to distribute credentials for the registry holding the external-dns helm chart.
+	// SecretsToCopy specifies secrets that should be copied to either the cluster's namespace on the platform cluster,
+	// or the namespace on the target cluster where the helm chart will be installed into.
 	// +optional
-	SecretsToCopy []SecretCopy `json:"secretsToCopy,omitempty"`
+	SecretsToCopy *SecretsToCopy `json:"secretsToCopy,omitempty"`
 
 	// HelmReleaseReconciliationInterval is the interval at which the HelmRelease for external-dns is reconciled.
 	// The value can be overwritten for specific purposes using ExternalDNSForPurposes.
@@ -34,15 +34,28 @@ type DNSServiceConfigSpec struct {
 	ExternalDNSForPurposes []ExternalDNSPurposeConfig `json:"externalDNSForPurposes,omitempty"`
 }
 
+type SecretsToCopy struct {
+	// ToPlatformCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the platform cluster.
+	// This is useful e.g. for pull secrets for the helm chart registry.
+	// +optional
+	ToPlatformCluster []SecretCopy `json:"toPlatformCluster,omitempty"`
+	// ToTargetCluster lists secrets from the provider namespace that should be copied into the cluster's namespace on the target cluster.
+	// This allows propagating secrets that are required by the helm chart to the target cluster.
+	// +optional
+	ToTargetCluster []SecretCopy `json:"toTargetCluster,omitempty"`
+}
+
 // ExternalDNSSource defines the source of the external-dns helm chart in form of a Flux source.
 // Exactly one of 'HelmRepository', 'GitRepository' or 'OCIRepository' must be set.
 // If 'copyAuthSecret' is set, the referenced source secret is copied into the namespace where the Flux resources are created with the specified target name.
 // +kubebuilder:validation:ExactlyOneOf=helm;git;oci
+// +kubebuilder:validation:XValidation:rule="(has(self.git) || has(self.helm)) ? (has(self.chartName) && size(self.chartName) > 0) : true", message="chartName must be set if git is used as source"
 type ExternalDNSSource struct {
 	// ChartName specifies the name of the external-dns chart.
-	// Depending on the source, this can also be a relative path within the repository.
-	// When using a source that needs a version (helm or oci), append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
-	// +kubebuilder:validation:MinLength=1
+	// Can be omitted for oci sources, required for git and helm sources.
+	// For git sources, this is the path within the git repository to the chart.
+	// For helm sources, append the version to the chart name using '@', e.g. 'external-dns@1.10.0' or omit for latest version.
+	// +optional
 	ChartName string                     `json:"chartName"`
 	Helm      *fluxv1.HelmRepositorySpec `json:"helm,omitempty"`
 	Git       *fluxv1.GitRepositorySpec  `json:"git,omitempty"`
@@ -52,7 +65,12 @@ type ExternalDNSSource struct {
 // SecretCopy defines the name of the secret to copy and the name of the copied secret.
 // If target is nil or target.name is empty, the secret will be copied with the same name as the source secret.
 type SecretCopy struct {
-	Source commonapi.LocalObjectReference  `json:"source"`
+	// Source references the source secret to copy.
+	// It has to be in the namespace the provider pod is running in.
+	Source commonapi.LocalObjectReference `json:"source"`
+	// Target is the name of the copied secret.
+	// If not set, the secret will be copied with the same name as the source secret.
+	// +optional
 	Target *commonapi.LocalObjectReference `json:"target"`
 }
 
@@ -80,8 +98,9 @@ type ExternalDNSPurposeConfig struct {
 	// - <environment> will be replaced with the environment name of the operator.
 	// - <cluster.name> will be replaced with the name of the reconciled Cluster.
 	// - <cluster.namespace> will be replaced with the namespace of the reconciled Cluster.
-	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Type=object
 	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	HelmValues *apiextensionsv1.JSON `json:"helmValues"`
 }
 

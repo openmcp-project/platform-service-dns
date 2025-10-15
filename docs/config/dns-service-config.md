@@ -10,6 +10,14 @@ metadata:
   name: dns
   namespace: openmcp-system
 spec:
+  secretsToCopy: # optional
+    toPlatformCluster: # optional
+    - source:
+        name: my-secret
+      target: # optional
+        name: my-copied-secret
+    toTargetCluster: [] # optional
+
   externalDNSSource:
     chartName: charts/external-dns # path to the external-dns helm chart within the chosen repository
     git:
@@ -30,6 +38,20 @@ spec:
       foo: bar
       asdf: qwer
 ```
+
+#### Secret Copying
+
+The `secretsToCopy` field allows to specify secrets that should be copied. The source of the secrets is always the provider namespace on the platform cluster.
+
+Secrets referenced in `secretsToCopy.toPlatformCluster` will be copied into the reconciled `Cluster` resource's namespace on the platform cluster. This is the namespace that will host the Flux source resource and where pull secrets for the helm chart have to reside.
+
+Secrets referenced in `secretsToCopy.toTargetCluster` will be copied into the namespace where the helm chart will be deployed into on the cluster represented by the reconciled `Cluster` resource. This is useful if secrets are referenced in the deployed chart's values.
+
+In both cases, if the entry's `target` field is set, the secret will be renamed to that name when copied, otherwise it will keep its source name.
+
+If a secret that is to be created by the copy mechanism already exists, but is not managed by this controller (identified via labels), this will result in an error.
+
+⚠️ **Warning: This mechanism can copy secrets to other namespaces and even other clusters, therefore potentially making them accessible to users which do not have permissions to access the source secret. Use with caution!**
 
 #### Helm Chart Source
 
@@ -97,3 +119,101 @@ purposeSelector:
     name: foo
 ```
 Matches all `Cluster` resources that do not have `foo` in their purpose list.
+
+### Configuration Examples
+
+All examples below use a purpose selector that matches all `Cluster` resources which have `test` among their purposes.
+
+###### Example 1 - Git Repo with DNS Secret
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  secretsToCopy:
+    toTargetCluster:
+    - source:
+        name: route53-access
+
+  externalDNSSource:
+    chartName: charts/external-dns
+    git:
+      url: https://github.com/kubernetes-sigs/external-dns
+      interval: 1h
+      ref:
+        tag: v0.19.0
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues:
+      provider:
+        name: aws
+      env:
+      - name: AWS_DEFAULT_REGION
+        value: eu-central-1
+      extraVolumes:
+      - name: aws-credentials
+        secret:
+          secretName: route53-access
+      extraVolumeMounts:
+      - name: aws-credentials
+        mountPath: /.aws
+        readOnly: true
+```
+
+###### Example 2 - OCI Repo with Auth Secret
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  secretsToCopy:
+    toPlatformCluster:
+    - source:
+        name: ghcr-access
+
+  externalDNSSource:
+    oci:
+      url: oci://ghcr.io/my-user/external-dns
+      interval: 1h
+      ref:
+        tag: "1.19.0"
+      secretRef:
+        name: ghcr-access
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues: {}
+```
+
+###### Example 3 - Helm Repo
+
+```yaml
+apiVersion: dns.openmcp.cloud/v1alpha1
+kind: DNSServiceConfig
+metadata:
+  name: dns
+  namespace: openmcp-system
+spec:
+  externalDNSSource:
+    chartName: external-dns@1.19.0
+    helm:
+      url: https://kubernetes-sigs.github.io/external-dns/
+      interval: 1h
+
+  externalDNSForPurposes:
+  - name: test
+    purposeSelector:
+      name: test
+    helmValues: {}
+```

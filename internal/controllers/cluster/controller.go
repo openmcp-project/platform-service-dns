@@ -16,10 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -45,17 +47,25 @@ import (
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 )
 
-const ControllerName = "DNSCluster"
-const defaultRequeueAfterDuration = 30 * time.Second
+const (
+	ControllerName              = "DNSCluster"
+	defaultRequeueAfterDuration = 30 * time.Second
+	TargetClusterNamespace      = "external-dns"
+
+	SourceKindHelmRepository = "HelmRepository"
+	SourceKindGitRepository  = "GitRepository"
+	SourceKindOCIRepository  = "OCIRepository"
+)
 
 type ClusterReconciler struct {
-	PlatformCluster   *clusters.Cluster
-	eventRecorder     record.EventRecorder
-	ProviderName      string
-	ProviderNamespace string
-	Environment       string
-	KnownClusters     map[types.NamespacedName]struct{}
-	KnownClustersLock *sync.RWMutex
+	PlatformCluster    *clusters.Cluster
+	eventRecorder      record.EventRecorder
+	ProviderName       string
+	ProviderNamespace  string
+	Environment        string
+	KnownClusters      map[types.NamespacedName]struct{}
+	KnownClustersLock  *sync.RWMutex
+	FakeClientMappings map[string]client.Client // only used for testing
 }
 
 func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace, environment string) *ClusterReconciler {
@@ -83,6 +93,8 @@ type ReconcileResult struct {
 	SourceKind string
 	// AccessRequest is the AccessRequest that provides access to the Cluster, if access was successfully obtained.
 	AccessRequest *clustersv1alpha1.AccessRequest
+	// Access is the client that can be used to access the Cluster, if access was successfully obtained.
+	Access *clusters.Cluster
 	// Message is an optional message to be printed in the generated event.
 	Message string
 	// ProviderConfig is the complete provider configuration.
@@ -241,17 +253,67 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 	}
 	rr.AccessRequest = ar
 
-	rr, copied := r.copySecrets(ctx, c, expectedLabels, rr)
+	// get access to Cluster
+	if ar.Status.SecretRef == nil {
+		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' does not have a secretRef in its status despite being granted", ar.Namespace, ar.Name)
+		return rr
+	}
+	sec := &corev1.Secret{}
+	sec.Name = ar.Status.SecretRef.Name
+	sec.Namespace = ar.Status.SecretRef.Namespace
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(sec), sec); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting secret '%s/%s' referenced by AccessRequest '%s/%s': %w", sec.Namespace, sec.Name, ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		return rr
+	}
+	kcfgData := sec.Data[clustersv1alpha1.SecretKeyKubeconfig]
+	if strings.HasPrefix(string(kcfgData), "fake:") && r.FakeClientMappings != nil {
+		log.Info("Using fake client for testing, this message should never appear outside of tests")
+		id := strings.TrimPrefix(string(kcfgData), "fake:")
+		fk := r.FakeClientMappings[id]
+		if fk == nil {
+			fk = fake.NewFakeClient()
+			r.FakeClientMappings[id] = fk
+		}
+		rr.Access = clusters.NewTestClusterFromClient(id, fk)
+	} else {
+		rest, err := clientcmd.RESTConfigFromKubeConfig(kcfgData)
+		if err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
+			return rr
+		}
+		rr.Access = clusters.New(ar.Name).WithRESTConfig(rest)
+		if err := rr.Access.InitializeClient(nil); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing client for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
+			return rr
+		}
+	}
+
+	rr, copied := r.copySecrets(ctx, c.Namespace, expectedLabels, rr, platformClusterCopy)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
 	// remove any secrets that were copied in a previous run but are no longer configured to be copied
-	rr = r.removeSecrets(ctx, c, expectedLabels, rr, copied)
+	rr = r.removeSecrets(ctx, c.Namespace, expectedLabels, rr, platformClusterCopy, copied)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
 
 	rr = r.deployHelmChartSource(ctx, c, expectedLabels, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr = r.ensureTargetClusterNamespace(ctx, TargetClusterNamespace, rr)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+
+	rr, copied = r.copySecrets(ctx, TargetClusterNamespace, expectedLabels, rr, targetClusterCopy)
+	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+		return rr
+	}
+	// remove any secrets that were copied in a previous run but are no longer configured to be copied
+	rr = r.removeSecrets(ctx, TargetClusterNamespace, expectedLabels, rr, targetClusterCopy, copied)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
@@ -281,20 +343,76 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 		return rr
 	}
 
+	// get access to Cluster
+	accessRequestGone := false
+	ar := &clustersv1alpha1.AccessRequest{}
+	ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
+	ar.SetNamespace(c.Namespace)
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
+		if !apierrors.IsNotFound(err) {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+		accessRequestGone = true
+	}
+	if !accessRequestGone && ar.Status.IsGranted() {
+		if ar.Status.SecretRef == nil {
+			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' does not have a secretRef in its status despite being granted", ar.Namespace, ar.Name)
+			return rr
+		}
+		sec := &corev1.Secret{}
+		sec.Name = ar.Status.SecretRef.Name
+		sec.Namespace = ar.Status.SecretRef.Namespace
+		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(sec), sec); err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting secret '%s/%s' referenced by AccessRequest '%s/%s': %w", sec.Namespace, sec.Name, ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+			return rr
+		}
+		kcfgData := sec.Data[clustersv1alpha1.SecretKeyKubeconfig]
+		if strings.HasPrefix(string(kcfgData), "fake:") && r.FakeClientMappings != nil {
+			log.Info("Using fake client for testing, this message should never appear outside of tests")
+			id := strings.TrimPrefix(string(kcfgData), "fake:")
+			fk := r.FakeClientMappings[id]
+			if fk == nil {
+				fk = fake.NewFakeClient()
+				r.FakeClientMappings[id] = fk
+			}
+			rr.Access = clusters.NewTestClusterFromClient(id, fk)
+		} else {
+			rest, err := clientcmd.RESTConfigFromKubeConfig(kcfgData)
+			if err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
+				return rr
+			}
+			rr.Access = clusters.New(ar.Name).WithRESTConfig(rest)
+			if err := rr.Access.InitializeRESTConfig(); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
+				return rr
+			}
+			if err := rr.Access.InitializeClient(nil); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing client for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
+				return rr
+			}
+		}
+
+		rr = r.removeSecrets(ctx, TargetClusterNamespace, expectedLabels, rr, targetClusterCopy, nil)
+		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
+			return rr
+		}
+	} else {
+		log.Info("Skipping removal of copied secrets on target cluster because access is not available")
+	}
+
 	rr = r.undeployHelmChartSource(ctx, c, expectedLabels, rr)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
 
-	rr = r.removeSecrets(ctx, c, expectedLabels, rr, nil)
+	rr = r.removeSecrets(ctx, c.Namespace, expectedLabels, rr, platformClusterCopy, nil)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
 		return rr
 	}
 
 	// delete AccessRequest
-	ar := &clustersv1alpha1.AccessRequest{}
-	ar.Name = accesslib.StableRequestNameFromLocalName(strings.ToLower(ControllerName), c.Name)
-	ar.Namespace = c.Namespace
 	if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
 		if !apierrors.IsNotFound(err) {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
@@ -317,66 +435,94 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 	return rr
 }
 
+type copyTo string
+
+const (
+	platformClusterCopy copyTo = "platform"
+	targetClusterCopy   copyTo = "target"
+)
+
 // copySecrets copies the configured secrets into the Cluster namespace.
 // Returns a list of the names of the copied secrets.
-func (r *ClusterReconciler) copySecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult) (ReconcileResult, sets.Set[string]) {
+func (r *ClusterReconciler) copySecrets(ctx context.Context, namespace string, expectedLabels map[string]string, rr ReconcileResult, copyTarget copyTo) (ReconcileResult, sets.Set[string]) {
 	log := logging.FromContextOrPanic(ctx)
 	copied := sets.New[string]()
 
 	// copy secrets if configured
-	for i, stc := range rr.ProviderConfig.Spec.SecretsToCopy {
-		source := &corev1.Secret{}
-		source.Name = stc.Source.Name
-		source.Namespace = r.ProviderNamespace
-		log.Debug("Secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name, "index", i)
-		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(source), source); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s' (index: %d): %w", source.Namespace, source.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+	if rr.ProviderConfig.Spec.SecretsToCopy != nil {
+		var secretsToCopy []dnsv1alpha1.SecretCopy
+		var targetAccess client.Client
+		var interactionProblemReason string
+		switch copyTarget {
+		case platformClusterCopy:
+			secretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToPlatformCluster
+			targetAccess = r.PlatformCluster.Client()
+			interactionProblemReason = clusterconst.ReasonPlatformClusterInteractionProblem
+		case targetClusterCopy:
+			secretsToCopy = rr.ProviderConfig.Spec.SecretsToCopy.ToTargetCluster
+			targetAccess = rr.Access.Client()
+			interactionProblemReason = dnsv1alpha1.ReasonTargetClusterInteractionProblem
+		}
+		if targetAccess == nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("no access to cluster '%s' for copying secrets", copyTarget), clusterconst.ReasonInternalError)
 			return rr, copied
 		}
-
-		// check if target secret already exists
-		target := &corev1.Secret{}
-		target.Name = source.Name
-		if stc.Target != nil && stc.Target.Name != "" {
-			target.Name = stc.Target.Name
-		}
-		target.Namespace = c.Namespace
-		targetExists := true
-		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
-			if !apierrors.IsNotFound(err) {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+		for i, stc := range secretsToCopy {
+			source := &corev1.Secret{}
+			source.Name = stc.Source.Name
+			source.Namespace = r.ProviderNamespace
+			log.Debug("Secret copying configured, getting source secret", "sourceNamespace", source.Namespace, "sourceName", source.Name, "index", i)
+			if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(source), source); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting source secret '%s/%s' (index: %d): %w", source.Namespace, source.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
 				return rr, copied
 			}
-			targetExists = false
-		}
-		if targetExists {
-			// if target secret exists, verify that it is managed by us
-			log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
-			for k, v := range expectedLabels {
-				if v2, ok := target.Labels[k]; !ok || v2 != v {
-					rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' (index: %d) already exists and is not managed by %s controller", target.Namespace, target.Name, i, ControllerName), clusterconst.ReasonConfigurationProblem)
+
+			// check if target secret already exists
+			target := &corev1.Secret{}
+			target.Name = source.Name
+			if stc.Target != nil && stc.Target.Name != "" {
+				target.Name = stc.Target.Name
+			}
+			target.Namespace = namespace
+			if copyTarget == platformClusterCopy && target.Namespace == source.Namespace && target.Name == source.Name {
+				log.Debug("Skipping copying of secret because source and target are identical", "secretNamespace", target.Namespace, "secretName", target.Name, "index", i)
+				copied.Insert(target.Name)
+				continue
+			}
+			targetExists := true
+			if err := targetAccess.Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
+				if !apierrors.IsNotFound(err) {
+					rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), interactionProblemReason)
 					return rr, copied
 				}
+				targetExists = false
 			}
-		}
-		log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
-		if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), target, func() error {
-			if err := controllerutil.SetOwnerReference(c, target, r.PlatformCluster.Scheme()); err != nil {
-				return fmt.Errorf("error setting owner reference on target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err)
+			if targetExists {
+				// if target secret exists, verify that it is managed by us
+				log.Debug("Target secret already exists", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
+				for k, v := range expectedLabels {
+					if v2, ok := target.Labels[k]; !ok || v2 != v {
+						rr.ReconcileError = errutils.WithReason(fmt.Errorf("target secret '%s/%s' (index: %d) already exists and is not managed by %s controller", target.Namespace, target.Name, i, ControllerName), clusterconst.ReasonConfigurationProblem)
+						return rr, copied
+					}
+				}
 			}
-			target.Labels = maputils.Merge(target.Labels, source.Labels, expectedLabels)
-			target.Annotations = maputils.Merge(target.Annotations, source.Annotations)
-			target.Data = make(map[string][]byte, len(source.Data))
-			maps.Copy(target.Data, source.Data)
-			target.Type = source.Type
-			return nil
-		}); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr, copied
+			log.Debug("Creating or updating target secret", "targetNamespace", target.Namespace, "targetName", target.Name, "index", i)
+			if _, err := controllerutil.CreateOrUpdate(ctx, targetAccess, target, func() error {
+				target.Labels = maputils.Merge(target.Labels, source.Labels, expectedLabels)
+				target.Annotations = maputils.Merge(target.Annotations, source.Annotations)
+				target.Data = make(map[string][]byte, len(source.Data))
+				maps.Copy(target.Data, source.Data)
+				target.Type = source.Type
+				return nil
+			}); err != nil {
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating target secret '%s/%s' (index: %d): %w", target.Namespace, target.Name, i, err), interactionProblemReason)
+				return rr, copied
+			}
+			copied.Insert(target.Name)
 		}
-		copied.Insert(target.Name)
+		rr.Message = fmt.Sprintf("Successfully copied %d secrets into namespace '%s' on cluster '%s'", len(secretsToCopy), namespace, copyTarget)
 	}
-	rr.Message = fmt.Sprintf("Successfully copied %d secrets into Cluster namespace", len(rr.ProviderConfig.Spec.SecretsToCopy))
 
 	return rr, copied
 }
@@ -418,7 +564,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			helmRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Helm.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "HelmRepository"
+		rr.SourceKind = SourceKindHelmRepository
 		for i := range existingHelm.Items {
 			obj := &existingHelm.Items[i]
 			if obj.GetName() != sourceName {
@@ -437,7 +583,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			gitRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.Git.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "GitRepository"
+		rr.SourceKind = SourceKindGitRepository
 		for i := range existingGit.Items {
 			obj := &existingGit.Items[i]
 			if obj.GetName() != sourceName {
@@ -456,7 +602,7 @@ func (r *ClusterReconciler) deployHelmChartSource(ctx context.Context, c *cluste
 			ociRepo.Spec = *rr.ProviderConfig.Spec.ExternalDNSSource.OCI.DeepCopy()
 			return nil
 		}
-		rr.SourceKind = "OCIRepository"
+		rr.SourceKind = SourceKindOCIRepository
 		for i := range existingOCI.Items {
 			obj := &existingOCI.Items[i]
 			if obj.GetName() != sourceName {
@@ -515,24 +661,36 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		// labels
 		hr.Labels = maputils.Merge(hr.Labels, expectedLabels)
 		// chart
-		hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
-			Spec: fluxhelmv2.HelmChartTemplateSpec{
-				SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
-					APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
-					Kind:       rr.SourceKind,
-					Name:       hr.Name,
-					Namespace:  hr.Namespace,
+		if rr.SourceKind == SourceKindOCIRepository {
+			hr.Spec.Chart = nil
+			hr.Spec.ChartRef = &fluxhelmv2.CrossNamespaceSourceReference{
+				APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+				Kind:       rr.SourceKind,
+				Name:       hr.Name,
+				Namespace:  hr.Namespace,
+			}
+		} else {
+			hr.Spec.ChartRef = nil
+			hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
+				Spec: fluxhelmv2.HelmChartTemplateSpec{
+					SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
+						APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+						Kind:       rr.SourceKind,
+						Name:       hr.Name,
+						Namespace:  hr.Namespace,
+					},
 				},
-			},
-		}
-		chartNameVersion := strings.Split(rr.ProviderConfig.Spec.ExternalDNSSource.ChartName, "@")
-		hr.Spec.Chart.Spec.Chart = chartNameVersion[0]
-		if len(chartNameVersion) > 1 {
-			hr.Spec.Chart.Spec.Version = chartNameVersion[1]
+			}
+			chartNameVersion := strings.Split(rr.ProviderConfig.Spec.ExternalDNSSource.ChartName, "@")
+			hr.Spec.Chart.Spec.Chart = chartNameVersion[0]
+			if len(chartNameVersion) > 1 {
+				hr.Spec.Chart.Spec.Version = chartNameVersion[1]
+			}
 		}
 		// release information
 		hr.Spec.ReleaseName = "external-dns"
-		hr.Spec.TargetNamespace = "external-dns"
+		hr.Spec.TargetNamespace = TargetClusterNamespace
+		hr.Spec.StorageNamespace = TargetClusterNamespace
 		// values
 		values := string(rr.Config.HelmValues.Raw)
 		// at some point '<' and '>' get escaped and we have to match the escaped version here
@@ -547,7 +705,6 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 			hr.Spec.Install = &fluxhelmv2.Install{}
 		}
 		hr.Spec.Install.CRDs = fluxhelmv2.CreateReplace
-		hr.Spec.Install.CreateNamespace = true
 		if hr.Spec.Install.Remediation == nil {
 			hr.Spec.Install.Remediation = &fluxhelmv2.InstallRemediation{}
 		}
@@ -657,19 +814,19 @@ func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clus
 	toBeDeleted := []client.Object{}
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingHelm.Items, func(obj fluxsourcev1.HelmRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "HelmRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindHelmRepository})
 		}
 		return &obj
 	})...)
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingGit.Items, func(obj fluxsourcev1.GitRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "GitRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindGitRepository})
 		}
 		return &obj
 	})...)
 	toBeDeleted = append(toBeDeleted, collections.ProjectSliceToSlice(existingOCI.Items, func(obj fluxsourcev1.OCIRepository) client.Object {
 		if obj.GetObjectKind().GroupVersionKind().Kind == "" {
-			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: "OCIRepository"})
+			obj.SetGroupVersionKind(schema.GroupVersionKind{Group: fluxsourcev1.GroupVersion.Group, Version: fluxsourcev1.GroupVersion.Version, Kind: SourceKindOCIRepository})
 		}
 		return &obj
 	})...)
@@ -691,13 +848,28 @@ func (r *ClusterReconciler) undeployHelmChartSource(ctx context.Context, c *clus
 // removeSecrets removes all secrets from the Cluster namespace where the labels indicate they were created by this controller for the given Cluster.
 // Secrets listed in 'keep' are not deleted.
 // It does not wait for their deletion.
-func (r *ClusterReconciler) removeSecrets(ctx context.Context, c *clustersv1alpha1.Cluster, expectedLabels map[string]string, rr ReconcileResult, keep sets.Set[string]) ReconcileResult {
+func (r *ClusterReconciler) removeSecrets(ctx context.Context, namespace string, expectedLabels map[string]string, rr ReconcileResult, copyTarget copyTo, keep sets.Set[string]) ReconcileResult {
 	log := logging.FromContextOrPanic(ctx)
+
+	var targetAccess client.Client
+	var interactionProblemReason string
+	switch copyTarget {
+	case platformClusterCopy:
+		targetAccess = r.PlatformCluster.Client()
+		interactionProblemReason = clusterconst.ReasonPlatformClusterInteractionProblem
+	case targetClusterCopy:
+		targetAccess = rr.Access.Client()
+		interactionProblemReason = dnsv1alpha1.ReasonTargetClusterInteractionProblem
+	}
+	if targetAccess == nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("no access to cluster '%s' for removing secrets", copyTarget), clusterconst.ReasonInternalError)
+		return rr
+	}
 
 	// list existing secrets to detect obsolete ones
 	existingSecrets := &corev1.SecretList{}
-	if err := r.PlatformCluster.Client().List(ctx, existingSecrets, client.InNamespace(c.Namespace), client.MatchingLabels(expectedLabels)); err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing Secret resources in target namespace '%s': %w", c.Namespace, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+	if err := targetAccess.List(ctx, existingSecrets, client.InNamespace(namespace), client.MatchingLabels(expectedLabels)); err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error listing existing Secret resources in target namespace '%s': %w", namespace, err), interactionProblemReason)
 		return rr
 	}
 
@@ -711,16 +883,47 @@ func (r *ClusterReconciler) removeSecrets(ctx context.Context, c *clustersv1alph
 			continue
 		}
 		log.Info("Deleting copied secret", "resourceName", obj.GetName(), "resourceNamespace", obj.GetNamespace())
-		if err := r.PlatformCluster.Client().Delete(ctx, obj); err != nil {
+		if err := targetAccess.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting Secret '%s/%s': %w", obj.GetNamespace(), obj.GetName(), err), clusterconst.ReasonPlatformClusterInteractionProblem)
+				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting Secret '%s/%s': %w", obj.GetNamespace(), obj.GetName(), err), interactionProblemReason)
 				return rr
 			}
 		}
 		deleted++
 	}
 
-	rr.Message = fmt.Sprintf("Deleted %d copied secrets from Cluster namespace, kept %d.", deleted, kept)
+	rr.Message = fmt.Sprintf("Deleted %d copied secrets from namespace '%s' on cluster '%s', kept %d.", deleted, namespace, copyTarget, kept)
+	return rr
+}
+
+func (r *ClusterReconciler) ensureTargetClusterNamespace(ctx context.Context, namespace string, rr ReconcileResult) ReconcileResult {
+	log := logging.FromContextOrPanic(ctx)
+
+	ns := &corev1.Namespace{}
+	ns.Name = namespace
+
+	log.Debug("Checking if target namespace exists on target cluster", "targetNamespace", ns.Name)
+	if err := rr.Access.Client().Get(ctx, client.ObjectKeyFromObject(ns), ns); err != nil {
+		if !apierrors.IsNotFound(err) {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting target namespace '%s' on target cluster: %w", ns.Name, err), dnsv1alpha1.ReasonTargetClusterInteractionProblem)
+			return rr
+		}
+	} else {
+		log.Debug("Target namespace already exists on target cluster", "targetNamespace", ns.Name)
+		return rr
+	}
+
+	// create target namespace
+	log.Info("Creating target namespace on target cluster", "targetNamespace", ns.Name)
+	// the namespace will not be removed again, so there is no need to add the usual managed labels
+	if err := rr.Access.Client().Create(ctx, ns); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating target namespace '%s' on target cluster: %w", ns.Name, err), dnsv1alpha1.ReasonTargetClusterInteractionProblem)
+			return rr
+		}
+	}
+
+	rr.Message = fmt.Sprintf("Successfully created target namespace '%s' on target cluster.", ns.Name)
 	return rr
 }
 
