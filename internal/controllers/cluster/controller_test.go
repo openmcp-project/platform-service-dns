@@ -324,9 +324,6 @@ var _ = Describe("ClusterReconciler", func() {
 	It("should use finalizers and remove resources when the Cluster is being deleted", func() {
 		env, _ := defaultTestSetup("testdata", "test-01")
 
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
-
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
 		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
@@ -394,9 +391,6 @@ var _ = Describe("ClusterReconciler", func() {
 	It("should delete obsolete flux sources", func() {
 		env, _ := defaultTestSetup("testdata", "test-01")
 
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
-
 		// create dummy flux sources
 		expectedLabels := map[string]string{
 			openmcpconst.ManagedByLabel:      managedByValue,
@@ -438,9 +432,6 @@ var _ = Describe("ClusterReconciler", func() {
 	It("should create a GitRepository if configured", func() {
 		env, _ := defaultTestSetup("testdata", "test-03")
 
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
-
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
 		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
@@ -470,9 +461,6 @@ var _ = Describe("ClusterReconciler", func() {
 
 	It("should create a HelmRepository if configured", func() {
 		env, _ := defaultTestSetup("testdata", "test-04")
-
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
 
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
@@ -504,9 +492,6 @@ var _ = Describe("ClusterReconciler", func() {
 	It("should replace the special keywords in the values correctly", func() {
 		env, _ := defaultTestSetup("testdata", "test-03")
 
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
-
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
 		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
@@ -535,9 +520,6 @@ var _ = Describe("ClusterReconciler", func() {
 	It("should not copy secrets if source and destination are identical", func() {
 		env, _ := defaultTestSetup("testdata", "test-05")
 
-		cfg := &dnsv1alpha1.DNSServiceConfig{}
-		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: providerName}, cfg)).To(Succeed())
-
 		c1 := &clustersv1alpha1.Cluster{}
 		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "test"}, c1)).To(Succeed())
 		s1 := &corev1.Secret{}
@@ -552,6 +534,64 @@ var _ = Describe("ClusterReconciler", func() {
 		Expect(env.Client().Get(env.Ctx, client.ObjectKeyFromObject(s1), s1)).To(Succeed())
 		// verify that the secret was not copied (no label added)
 		Expect(s1.Labels).To(BeEmpty())
+	})
+
+	It("should copy image pull secrets from the PlatformService resource", func() {
+		env, rec := defaultTestSetup("testdata", "test-06")
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		fakeAccessRequestReadiness(env, c1)
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
+
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: "cluster-01",
+		}
+		ss := &corev1.SecretList{}
+		// copied secrets on platform cluster
+		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ConsistOf(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("value")}),
+			}),
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("another-auth"),
+				}),
+				"Data": Equal(map[string][]byte{"auth": []byte("asdf")}),
+			}),
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-other-secret"),
+				}),
+				"Data": Equal(map[string][]byte{"foo": []byte("bar")}),
+			}),
+		))
+		// copied secrets on target cluster
+		Expect(rec.FakeClientMappings["foo/cluster-01"].List(env.Ctx, ss, client.InNamespace(cluster.TargetClusterNamespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ConsistOf(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("value")}),
+			}),
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("another-auth"),
+				}),
+				"Data": Equal(map[string][]byte{"auth": []byte("asdf")}),
+			}),
+		))
+
 	})
 
 })

@@ -41,7 +41,7 @@ spec:
 
 #### Secret Copying
 
-The `secretsToCopy` field allows to specify secrets that should be copied. The source of the secrets is always the provider namespace on the platform cluster.
+The `secretsToCopy` field allows to specify secrets that should be copied (in addition to the image pull secrets from the `PlatformService` resource). The source of the secrets is always the provider namespace on the platform cluster.
 
 Secrets referenced in `secretsToCopy.toPlatformCluster` will be copied into the reconciled `Cluster` resource's namespace on the platform cluster. This is the namespace that will host the Flux source resource and where pull secrets for the helm chart have to reside.
 
@@ -50,6 +50,8 @@ Secrets referenced in `secretsToCopy.toTargetCluster` will be copied into the na
 In both cases, if the entry's `target` field is set, the secret will be renamed to that name when copied, otherwise it will keep its source name.
 
 If a secret that is to be created by the copy mechanism already exists, but is not managed by this controller (identified via labels), this will result in an error.
+
+⚠️ Note that the secrets referenced in `spec.imagePullSecrets` of the `PlatformService` resource will always be copied to both, platform cluster and target cluster.
 
 ⚠️ **Warning: This mechanism can copy secrets to other namespaces and even other clusters, therefore potentially making them accessible to users which do not have permissions to access the source secret. Use with caution!**
 

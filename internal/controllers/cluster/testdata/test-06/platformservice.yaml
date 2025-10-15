@@ -1,0 +1,10 @@
+apiVersion: openmcp.cloud/v1alpha1
+kind: PlatformService
+metadata:
+  name: dns-service
+spec:
+  image: example.com/platform-service-dns:latest
+  verbosity: INFO
+  imagePullSecrets:
+  - name: my-auth
+  - name: another-auth
