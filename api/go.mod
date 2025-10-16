@@ -1,6 +1,6 @@
 module github.com/openmcp-project/platform-service-dns/api
 
-go 1.25.1
+go 1.25.3
 
 require (
 	github.com/fluxcd/helm-controller/api v1.4.1
