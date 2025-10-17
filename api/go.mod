@@ -3,7 +3,7 @@ module github.com/openmcp-project/platform-service-dns/api
 go 1.25.3
 
 require (
-	github.com/fluxcd/helm-controller/api v1.4.1
+	github.com/fluxcd/helm-controller/api v1.4.2
 	github.com/fluxcd/source-controller/api v1.7.1
 	github.com/openmcp-project/openmcp-operator/api v0.15.1
 	k8s.io/apiextensions-apiserver v0.34.1
@@ -53,8 +53,8 @@ require (
 
 require (
 	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
-	github.com/fluxcd/pkg/apis/kustomize v1.12.0 // indirect
-	github.com/fluxcd/pkg/apis/meta v1.21.0 // indirect
+	github.com/fluxcd/pkg/apis/kustomize v1.13.0 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.22.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -64,7 +64,7 @@ require (
 	github.com/openmcp-project/controller-utils v0.23.1
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/net v0.45.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/api v0.34.1 // indirect
