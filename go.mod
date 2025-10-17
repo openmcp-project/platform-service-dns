@@ -6,7 +6,7 @@ replace github.com/openmcp-project/platform-service-dns/api => ./api
 
 require (
 	github.com/fluxcd/helm-controller/api v1.4.1
-	github.com/fluxcd/pkg/apis/meta v1.21.0
+	github.com/fluxcd/pkg/apis/meta v1.22.0
 	github.com/fluxcd/source-controller/api v1.7.1
 	github.com/openmcp-project/controller-utils v0.23.1
 	github.com/openmcp-project/openmcp-operator/api v0.15.1
@@ -85,7 +85,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20251002181428-27f1f14c8bb9 // indirect
-	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/net v0.45.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
