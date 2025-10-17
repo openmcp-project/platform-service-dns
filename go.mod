@@ -9,8 +9,8 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.22.0
 	github.com/fluxcd/source-controller/api v1.7.2
 	github.com/openmcp-project/controller-utils v0.23.1
-	github.com/openmcp-project/openmcp-operator/api v0.15.1
-	github.com/openmcp-project/openmcp-operator/lib v0.15.1
+	github.com/openmcp-project/openmcp-operator/api v0.15.2
+	github.com/openmcp-project/openmcp-operator/lib v0.15.3-0.20251017065940-637b58a6e264
 	github.com/openmcp-project/platform-service-dns/api v0.0.2
 	github.com/spf13/cobra v1.10.1
 	k8s.io/api v0.34.1
@@ -106,7 +106,7 @@ require (
 	k8s.io/component-base v0.34.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250814151709-d7b6acb124c3 // indirect
-	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d // indirect
+	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.31.2 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
