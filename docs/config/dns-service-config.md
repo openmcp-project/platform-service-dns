@@ -126,14 +126,13 @@ Matches all `Cluster` resources that do not have `foo` in their purpose list.
 
 All examples below use a purpose selector that matches all `Cluster` resources which have `test` among their purposes.
 
-###### Example 1 - Git Repo with DNS Secret
+###### Example 1 - Git Repo
 
 ```yaml
 apiVersion: dns.openmcp.cloud/v1alpha1
 kind: DNSServiceConfig
 metadata:
   name: dns
-  namespace: openmcp-system
 spec:
   secretsToCopy:
     toTargetCluster:
@@ -153,11 +152,19 @@ spec:
     purposeSelector:
       name: test
     helmValues:
+      policy: sync
+      txtOwnerId: '<environment>.<cluster.namespace>.<cluster.name>'
+      sources:
+      - service
+      - gateway-httproute
+      - gateway-tlsroute
       provider:
         name: aws
       env:
       - name: AWS_DEFAULT_REGION
         value: eu-central-1
+      - name: AWS_SHARED_CREDENTIALS_FILE
+        value: /.aws/credentials
       extraVolumes:
       - name: aws-credentials
         secret:
@@ -166,6 +173,21 @@ spec:
       - name: aws-credentials
         mountPath: /.aws
         readOnly: true
+```
+
+The AWS secret for this example is expected to look like this:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: route53-access
+  namespace: openmcp-system
+stringData:
+  credentials: |
+    [default]
+    aws_access_key_id=<access-key-id>
+    aws_secret_access_key=<secret-access-key>
+type: Opaque
 ```
 
 ###### Example 2 - OCI Repo with Auth Secret
@@ -178,9 +200,12 @@ metadata:
   namespace: openmcp-system
 spec:
   secretsToCopy:
+    toTargetCluster:
+    - source:
+        name: route53-access
     toPlatformCluster:
     - source:
-        name: ghcr-access
+        name: ghcr-access # pull secret for OCI registry holding the helm chart
 
   externalDNSSource:
     oci:
@@ -192,10 +217,7 @@ spec:
         name: ghcr-access
 
   externalDNSForPurposes:
-  - name: test
-    purposeSelector:
-      name: test
-    helmValues: {}
+  # similar to example 1
 ```
 
 ###### Example 3 - Helm Repo
@@ -207,6 +229,11 @@ metadata:
   name: dns
   namespace: openmcp-system
 spec:
+  secretsToCopy:
+    toTargetCluster:
+    - source:
+        name: route53-access
+
   externalDNSSource:
     chartName: external-dns@1.19.0
     helm:
@@ -214,8 +241,5 @@ spec:
       interval: 1h
 
   externalDNSForPurposes:
-  - name: test
-    purposeSelector:
-      name: test
-    helmValues: {}
+  # similar to example 1
 ```
