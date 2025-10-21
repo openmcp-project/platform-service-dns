@@ -16,12 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -37,13 +35,14 @@ import (
 	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	errutils "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
+	testutils "github.com/openmcp-project/controller-utils/pkg/testing"
 
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	clusterconst "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1/constants"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
-	accesslib "github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
+	accesslib "github.com/openmcp-project/openmcp-operator/lib/clusteraccess/advanced"
 
 	dnsv1alpha1 "github.com/openmcp-project/platform-service-dns/api/dns/v1alpha1"
 )
@@ -56,17 +55,19 @@ const (
 	SourceKindHelmRepository = "HelmRepository"
 	SourceKindGitRepository  = "GitRepository"
 	SourceKindOCIRepository  = "OCIRepository"
+
+	clusterId = "cluster"
 )
 
 type ClusterReconciler struct {
-	PlatformCluster    *clusters.Cluster
-	eventRecorder      record.EventRecorder
-	ProviderName       string
-	ProviderNamespace  string
-	Environment        string
-	KnownClusters      map[types.NamespacedName]struct{}
-	KnownClustersLock  *sync.RWMutex
-	FakeClientMappings map[string]client.Client // only used for testing
+	PlatformCluster         *clusters.Cluster
+	eventRecorder           record.EventRecorder
+	ProviderName            string
+	ProviderNamespace       string
+	Environment             string
+	KnownClusters           map[types.NamespacedName]struct{}
+	KnownClustersLock       *sync.RWMutex
+	ClusterAccessReconciler accesslib.ClusterAccessReconciler
 }
 
 func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace, environment string) *ClusterReconciler {
@@ -78,6 +79,22 @@ func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.Eve
 		Environment:       environment,
 		KnownClusters:     map[types.NamespacedName]struct{}{},
 		KnownClustersLock: &sync.RWMutex{},
+		ClusterAccessReconciler: accesslib.NewClusterAccessReconciler(platformCluster.Client(), ControllerName).
+			WithManagedLabels(func(controllerName string, req reconcile.Request, _ accesslib.ClusterRegistration) (string, string, map[string]string) {
+				return fmt.Sprintf("%s.%s", providerName, controllerName), req.Name, nil
+			}).
+			Register(accesslib.ExistingCluster(clusterId, "", accesslib.IdentityReferenceGenerator).
+				WithTokenAccess(&clustersv1alpha1.TokenConfig{
+					RoleRefs: []commonapi.RoleRef{
+						{
+							Kind: "ClusterRole",
+							Name: "cluster-admin",
+						},
+					},
+				}).
+				WithNamespaceGenerator(accesslib.RequestNamespaceGenerator).
+				Build(),
+			),
 	}
 }
 
@@ -223,80 +240,28 @@ func (r *ClusterReconciler) handleCreateOrUpdate(ctx context.Context, c *cluster
 	r.addKnownCluster(c)
 
 	log.Info("Creating or updating AccessRequest to get access to Cluster")
-	ar := &clustersv1alpha1.AccessRequest{}
-	ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
-	ar.SetNamespace(c.Namespace)
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), ar, func() error {
-		if err := controllerutil.SetOwnerReference(c, ar, r.PlatformCluster.Scheme()); err != nil {
-			return fmt.Errorf("error setting owner reference: %w", err)
-		}
-		ar.Labels = maputils.Merge(ar.Labels, expectedLabels)
-		ar.Spec.ClusterRef = &commonapi.ObjectReference{
-			Name:      c.Name,
-			Namespace: c.Namespace,
-		}
-		ar.Spec.Token = &clustersv1alpha1.TokenConfig{
-			RoleRefs: []commonapi.RoleRef{
-				{
-					Kind: "ClusterRole",
-					Name: "cluster-admin",
-				},
-			},
-		}
-		return nil
-	}); err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating or updating AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+	req := testutils.RequestFromObject(c)
+	res, err := r.ClusterAccessReconciler.Reconcile(ctx, req)
+	if err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error reconciling cluster access: %w", err), clusterconst.ReasonInternalError)
 		return rr
 	}
-	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
+	if res.RequeueAfter > 0 {
+		log.Info("Requeuing because cluster access is not yet available", "after", res.RequeueAfter)
+		rr.Result = res
 		return rr
 	}
-	if ar.Status.IsDenied() {
-		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' was denied, unable to proceed with deploying DNS configuration", ar.Namespace, ar.Name)
-		return rr
-	}
-	if !ar.Status.IsGranted() {
-		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' is not yet granted, waiting for access to be granted", ar.Namespace, ar.Name)
-		rr.Result.RequeueAfter = defaultRequeueAfterDuration
-		return rr
+	ar, err := r.ClusterAccessReconciler.AccessRequest(ctx, req, clusterId)
+	if err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest: %w", err), clusterconst.ReasonInternalError)
 	}
 	rr.AccessRequest = ar
-
-	// get access to Cluster
-	if ar.Status.SecretRef == nil {
-		rr.Message = fmt.Sprintf("AccessRequest '%s/%s' does not have a secretRef in its status despite being granted", ar.Namespace, ar.Name)
+	access, err := r.ClusterAccessReconciler.Access(ctx, req, clusterId)
+	if err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting access to Cluster: %w", err), clusterconst.ReasonInternalError)
 		return rr
 	}
-	sec := &corev1.Secret{}
-	sec.Name = ar.Status.SecretRef.Name
-	sec.Namespace = ar.Status.SecretRef.Namespace
-	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(sec), sec); err != nil {
-		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting secret '%s/%s' referenced by AccessRequest '%s/%s': %w", sec.Namespace, sec.Name, ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-		return rr
-	}
-	kcfgData := sec.Data[clustersv1alpha1.SecretKeyKubeconfig]
-	if strings.HasPrefix(string(kcfgData), "fake:") && r.FakeClientMappings != nil {
-		log.Info("Using fake client for testing, this message should never appear outside of tests")
-		id := strings.TrimPrefix(string(kcfgData), "fake:")
-		fk := r.FakeClientMappings[id]
-		if fk == nil {
-			fk = fake.NewFakeClient()
-			r.FakeClientMappings[id] = fk
-		}
-		rr.Access = clusters.NewTestClusterFromClient(id, fk)
-	} else {
-		rest, err := clientcmd.RESTConfigFromKubeConfig(kcfgData)
-		if err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-			return rr
-		}
-		rr.Access = clusters.New(ar.Name).WithRESTConfig(rest)
-		if err := rr.Access.InitializeClient(nil); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing client for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-			return rr
-		}
-	}
+	rr.Access = access
 
 	rr, copied := r.copySecrets(ctx, c.Namespace, expectedLabels, rr, platformClusterCopy)
 	if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
@@ -354,55 +319,19 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 	}
 
 	// get access to Cluster
-	accessRequestGone := false
-	ar := &clustersv1alpha1.AccessRequest{}
-	ar.SetName(accesslib.StableRequestNameFromLocalName(ControllerName, c.Name))
-	ar.SetNamespace(c.Namespace)
-	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(ar), ar); err != nil {
-		if !apierrors.IsNotFound(err) {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
-		}
-		accessRequestGone = true
+	req := testutils.RequestFromObject(c)
+	ar, err := r.ClusterAccessReconciler.AccessRequest(ctx, req, clusterId)
+	if client.IgnoreNotFound(err) != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest: %w", err), clusterconst.ReasonInternalError)
+		return rr
 	}
-	if !accessRequestGone && ar.Status.IsGranted() {
-		if ar.Status.SecretRef == nil {
-			rr.Message = fmt.Sprintf("AccessRequest '%s/%s' does not have a secretRef in its status despite being granted", ar.Namespace, ar.Name)
+	if ar != nil && ar.Status.IsGranted() {
+		access, err := r.ClusterAccessReconciler.Access(ctx, req, clusterId)
+		if err != nil {
+			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting access to Cluster: %w", err), clusterconst.ReasonInternalError)
 			return rr
 		}
-		sec := &corev1.Secret{}
-		sec.Name = ar.Status.SecretRef.Name
-		sec.Namespace = ar.Status.SecretRef.Namespace
-		if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(sec), sec); err != nil {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting secret '%s/%s' referenced by AccessRequest '%s/%s': %w", sec.Namespace, sec.Name, ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
-		}
-		kcfgData := sec.Data[clustersv1alpha1.SecretKeyKubeconfig]
-		if strings.HasPrefix(string(kcfgData), "fake:") && r.FakeClientMappings != nil {
-			log.Info("Using fake client for testing, this message should never appear outside of tests")
-			id := strings.TrimPrefix(string(kcfgData), "fake:")
-			fk := r.FakeClientMappings[id]
-			if fk == nil {
-				fk = fake.NewFakeClient()
-				r.FakeClientMappings[id] = fk
-			}
-			rr.Access = clusters.NewTestClusterFromClient(id, fk)
-		} else {
-			rest, err := clientcmd.RESTConfigFromKubeConfig(kcfgData)
-			if err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error creating REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-				return rr
-			}
-			rr.Access = clusters.New(ar.Name).WithRESTConfig(rest)
-			if err := rr.Access.InitializeRESTConfig(); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing REST config for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-				return rr
-			}
-			if err := rr.Access.InitializeClient(nil); err != nil {
-				rr.ReconcileError = errutils.WithReason(fmt.Errorf("error initializing client for Cluster from kubeconfig in secret '%s/%s': %w", sec.Namespace, sec.Name, err), clusterconst.ReasonInternalError)
-				return rr
-			}
-		}
+		rr.Access = access
 
 		rr = r.removeSecrets(ctx, TargetClusterNamespace, expectedLabels, rr, targetClusterCopy, nil)
 		if rr.ReconcileError != nil || rr.Result.RequeueAfter > 0 {
@@ -422,12 +351,15 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 		return rr
 	}
 
-	// delete AccessRequest
-	if err := r.PlatformCluster.Client().Delete(ctx, ar); err != nil {
-		if !apierrors.IsNotFound(err) {
-			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error deleting AccessRequest '%s/%s': %w", ar.Namespace, ar.Name, err), clusterconst.ReasonPlatformClusterInteractionProblem)
-			return rr
-		}
+	res, err := r.ClusterAccessReconciler.ReconcileDelete(ctx, req)
+	if err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error reconciling deletion of cluster access: %w", err), clusterconst.ReasonInternalError)
+		return rr
+	}
+	if res.RequeueAfter > 0 {
+		log.Info("Requeuing because cluster access has not been fully deleted yet", "after", res.RequeueAfter)
+		rr.Result = res
+		return rr
 	}
 
 	// remove finalizer from Cluster
