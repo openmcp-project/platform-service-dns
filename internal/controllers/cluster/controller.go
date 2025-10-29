@@ -319,13 +319,24 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 	}
 
 	// get access to Cluster
+	log.Info("Updating AccessRequest to get access to Cluster")
 	req := testutils.RequestFromObject(c)
+	res, err := r.ClusterAccessReconciler.Reconcile(ctx, req)
+	if err != nil {
+		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error reconciling cluster access: %w", err), clusterconst.ReasonInternalError)
+		return rr
+	}
+	if res.RequeueAfter > 0 {
+		log.Info("Requeuing because cluster access is not yet available", "after", res.RequeueAfter)
+		rr.Result = res
+		return rr
+	}
 	ar, err := r.ClusterAccessReconciler.AccessRequest(ctx, req, clusterId)
 	if client.IgnoreNotFound(err) != nil {
 		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting AccessRequest: %w", err), clusterconst.ReasonInternalError)
 		return rr
 	}
-	if ar != nil && ar.Status.IsGranted() {
+	if ar != nil && ar.DeletionTimestamp.IsZero() && ar.Status.IsGranted() {
 		access, err := r.ClusterAccessReconciler.Access(ctx, req, clusterId)
 		if err != nil {
 			rr.ReconcileError = errutils.WithReason(fmt.Errorf("error getting access to Cluster: %w", err), clusterconst.ReasonInternalError)
@@ -351,7 +362,7 @@ func (r *ClusterReconciler) handleDelete(ctx context.Context, c *clustersv1alpha
 		return rr
 	}
 
-	res, err := r.ClusterAccessReconciler.ReconcileDelete(ctx, req)
+	res, err = r.ClusterAccessReconciler.ReconcileDelete(ctx, req)
 	if err != nil {
 		rr.ReconcileError = errutils.WithReason(fmt.Errorf("error reconciling deletion of cluster access: %w", err), clusterconst.ReasonInternalError)
 		return rr
