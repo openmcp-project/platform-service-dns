@@ -8,9 +8,9 @@ require (
 	github.com/fluxcd/helm-controller/api v1.4.2
 	github.com/fluxcd/pkg/apis/meta v1.22.0
 	github.com/fluxcd/source-controller/api v1.7.2
-	github.com/openmcp-project/controller-utils v0.23.1
-	github.com/openmcp-project/openmcp-operator/api v0.15.2
-	github.com/openmcp-project/openmcp-operator/lib v0.15.3-0.20251017065940-637b58a6e264
+	github.com/openmcp-project/controller-utils v0.23.2
+	github.com/openmcp-project/openmcp-operator/api v0.16.0
+	github.com/openmcp-project/openmcp-operator/lib v0.16.1-0.20251030140622-66804142483a
 	github.com/openmcp-project/platform-service-dns/api v0.0.2
 	github.com/spf13/cobra v1.10.1
 	k8s.io/api v0.34.1
@@ -20,7 +20,7 @@ require (
 	sigs.k8s.io/yaml v1.6.0
 )
 
-require golang.org/x/mod v0.28.0 // indirect
+require golang.org/x/mod v0.29.0 // indirect
 
 require (
 	cel.dev/expr v0.24.0 // indirect
@@ -60,7 +60,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/onsi/ginkgo/v2 v2.26.0
+	github.com/onsi/ginkgo/v2 v2.27.1
 	github.com/onsi/gomega v1.38.2
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.0 // indirect
@@ -84,15 +84,15 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/exp v0.0.0-20251002181428-27f1f14c8bb9 // indirect
-	golang.org/x/net v0.45.0 // indirect
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
+	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/term v0.35.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/term v0.36.0 // indirect
+	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
-	golang.org/x/tools v0.37.0 // indirect
+	golang.org/x/tools v0.38.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
