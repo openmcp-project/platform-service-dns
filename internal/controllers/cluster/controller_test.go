@@ -54,6 +54,7 @@ func defaultTestSetup(testDirPathSegments ...string) (*testutils.Environment, ma
 		WithReconcilerConstructor(func(c client.Client) reconcile.Reconciler {
 			rec := cluster.NewClusterReconciler(clusters.NewTestClusterFromClient(platformCluster, c), nil, providerName, providerNamespace, environment)
 			rec.ClusterAccessReconciler.WithFakingCallback(accesslib.FakingCallback_WaitingForAccessRequestReadiness, accesslib.FakeAccessRequestReadiness())
+			rec.ClusterAccessReconciler.WithFakingCallback(accesslib.FakingCallback_WaitingForAccessRequestDeletion, accesslib.FakeAccessRequestDeletion([]string{"*"}, nil))
 			rec.ClusterAccessReconciler.WithFakeClientGenerator(func(ctx context.Context, kcfgData []byte, scheme *runtime.Scheme, additionalData ...any) (client.Client, error) {
 				if clusterRef, ok := strings.CutPrefix(string(kcfgData), "fake:cluster:"); ok {
 					if fc, ok := fakeClientMapping[clusterRef]; ok {
