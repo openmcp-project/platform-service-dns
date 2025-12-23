@@ -118,12 +118,15 @@ type PurposeSelector struct {
 // If not is set, the selector matches if the contained selector does not match.
 type PurposeSelectorRequirement struct {
 	// +kubebuilder:validation:items:Type=object
+	// +kubebuilder:validation:items:XPreserveUnknownFields
 	// +optional
 	And []PurposeSelectorRequirement `json:"and,omitempty"`
 	// +kubebuilder:validation:items:Type=object
+	// +kubebuilder:validation:items:XPreserveUnknownFields
 	// +optional
 	Or []PurposeSelectorRequirement `json:"or,omitempty"`
 	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	Not *PurposeSelectorRequirement `json:"not,omitempty"`
 	// +optional
