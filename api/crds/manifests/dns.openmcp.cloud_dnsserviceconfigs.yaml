@@ -82,14 +82,17 @@ spec:
                         and:
                           items:
                             type: object
+                            x-kubernetes-preserve-unknown-fields: true
                           type: array
                         name:
                           type: string
                         not:
                           type: object
+                          x-kubernetes-preserve-unknown-fields: true
                         or:
                           items:
                             type: object
+                            x-kubernetes-preserve-unknown-fields: true
                           type: array
                       type: object
                   required:
