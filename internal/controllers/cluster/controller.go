@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,11 +57,13 @@ const (
 	SourceKindOCIRepository  = "OCIRepository"
 
 	clusterId = "cluster"
+
+	EventActionReconcile = "Reconcile"
 )
 
 type ClusterReconciler struct {
 	PlatformCluster         *clusters.Cluster
-	eventRecorder           record.EventRecorder
+	eventRecorder           events.EventRecorder
 	ProviderName            string
 	ProviderNamespace       string
 	Environment             string
@@ -70,7 +72,7 @@ type ClusterReconciler struct {
 	ClusterAccessReconciler accesslib.ClusterAccessReconciler
 }
 
-func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.EventRecorder, providerName, providerNamespace, environment string) *ClusterReconciler {
+func NewClusterReconciler(platformCluster *clusters.Cluster, recorder events.EventRecorder, providerName, providerNamespace, environment string) *ClusterReconciler {
 	return &ClusterReconciler{
 		PlatformCluster:   platformCluster,
 		eventRecorder:     recorder,
@@ -101,6 +103,8 @@ func NewClusterReconciler(platformCluster *clusters.Cluster, recorder record.Eve
 var _ reconcile.Reconciler = &ClusterReconciler{}
 
 type ReconcileResult struct {
+	// RelatedObject is the related flux resource (usually a HelmRelease) that is managed for the Cluster.
+	RelatedObject client.Object
 	// Result is the result to return from the Reconcile function.
 	Result reconcile.Result
 	// ReconcileError is the error to return from the Reconcile function, if any occurred.
@@ -143,9 +147,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	// instead, output events for significant changes and errors
 	if r.eventRecorder != nil {
 		if rr.ReconcileError != nil {
-			r.eventRecorder.Event(c, corev1.EventTypeWarning, rr.ReconcileError.Reason(), rr.ReconcileError.Error())
+			r.eventRecorder.Eventf(c, rr.RelatedObject, corev1.EventTypeWarning, rr.ReconcileError.Reason(), EventActionReconcile, rr.ReconcileError.Error())
 		} else if rr.Message != "" {
-			r.eventRecorder.Event(c, corev1.EventTypeNormal, "Reconciled", rr.Message)
+			r.eventRecorder.Eventf(c, rr.RelatedObject, corev1.EventTypeNormal, "Reconciled", EventActionReconcile, rr.Message)
 		}
 	}
 
@@ -614,6 +618,7 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 	hr := &fluxhelmv2.HelmRelease{}
 	hr.Name = clusterBasedResourceName(c.Name)
 	hr.Namespace = c.Namespace
+	rr.RelatedObject = hr
 
 	log.Info("Creating or updating HelmRelease", "resourceName", hr.Name, "resourceNamespace", hr.Namespace)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.PlatformCluster.Client(), hr, func() error {
@@ -714,6 +719,7 @@ func (r *ClusterReconciler) undeployHelmRelease(ctx context.Context, c *clusters
 	hr := &fluxhelmv2.HelmRelease{}
 	hr.Name = clusterBasedResourceName(c.Name)
 	hr.Namespace = c.Namespace
+	rr.RelatedObject = hr
 
 	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(hr), hr); err != nil {
 		if apierrors.IsNotFound(err) {
