@@ -930,8 +930,7 @@ func (r *ClusterReconciler) listKnownClusters() []types.NamespacedName {
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// watch Cluster resources
-		For(&clustersv1alpha1.Cluster{}).
-		WithEventFilter(predicate.And(
+		For(&clustersv1alpha1.Cluster{}, builder.WithPredicates(predicate.And(
 			predicate.Or(
 				predicate.GenerationChangedPredicate{},
 				ctrlutils.DeletionTimestampChangedPredicate{},
@@ -946,7 +945,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					ctrlutils.HasAnnotationPredicate(dnsv1alpha1.OperationAnnotation, openmcpconst.OperationAnnotationValueIgnore),
 				),
 			),
-		)).
+		))).
 		// watch DNSServiceConfig resource and reconcile all Clusters that are known to have external-dns deployed if it changes
 		Watches(&dnsv1alpha1.DNSServiceConfig{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []ctrl.Request {
 			return collections.ProjectSliceToSlice(r.listKnownClusters(), func(nn types.NamespacedName) ctrl.Request {
