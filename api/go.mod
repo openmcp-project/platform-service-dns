@@ -4,7 +4,7 @@ go 1.25.6
 
 require (
 	github.com/fluxcd/helm-controller/api v1.4.5
-	github.com/fluxcd/source-controller/api v1.7.4
+	github.com/fluxcd/source-controller/api v1.8.0
 	github.com/openmcp-project/openmcp-operator/api v0.18.1
 	k8s.io/apiextensions-apiserver v0.35.0
 	k8s.io/apimachinery v0.35.0
@@ -54,7 +54,7 @@ require (
 require (
 	github.com/fluxcd/pkg/apis/acl v0.9.0 // indirect
 	github.com/fluxcd/pkg/apis/kustomize v1.14.0 // indirect
-	github.com/fluxcd/pkg/apis/meta v1.23.0 // indirect
+	github.com/fluxcd/pkg/apis/meta v1.25.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
