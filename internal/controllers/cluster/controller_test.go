@@ -587,4 +587,81 @@ var _ = Describe("ClusterReconciler", func() {
 
 	})
 
+	It("should propagate source secret updates to platform and target clusters", func() {
+		env, fakeClientMapping := defaultTestSetup("testdata", "test-01")
+
+		c1 := &clustersv1alpha1.Cluster{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "cluster-01", Namespace: "foo"}, c1)).To(Succeed())
+		rr := env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeNumerically(">", 0))
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
+
+		expectedLabels := map[string]string{
+			openmcpconst.ManagedByLabel:      managedByValue,
+			openmcpconst.ManagedPurposeLabel: c1.Name,
+		}
+
+		// verify initial secret data on platform cluster
+		ss := &corev1.SecretList{}
+		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ContainElement(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("value")}),
+			}),
+		))
+
+		// verify initial secret data on target cluster
+		Expect(fakeClientMapping["foo/cluster-01"].List(env.Ctx, ss, client.InNamespace(cluster.TargetClusterNamespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ContainElement(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-target-secret-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"foobar": []byte("foobar")}),
+			}),
+		))
+
+		// update source secret "my-auth" (copied to platform cluster as "my-auth-copy")
+		srcSecret := &corev1.Secret{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "my-auth", Namespace: providerNamespace}, srcSecret)).To(Succeed())
+		srcSecret.Data = map[string][]byte{"key": []byte("rotated-value")}
+		Expect(env.Client().Update(env.Ctx, srcSecret)).To(Succeed())
+
+		// update source secret "my-target-secret" (copied to target cluster as "my-target-secret-copy")
+		srcTargetSecret := &corev1.Secret{}
+		Expect(env.Client().Get(env.Ctx, client.ObjectKey{Name: "my-target-secret", Namespace: providerNamespace}, srcTargetSecret)).To(Succeed())
+		srcTargetSecret.Data = map[string][]byte{"foobar": []byte("rotated-foobar")}
+		Expect(env.Client().Update(env.Ctx, srcTargetSecret)).To(Succeed())
+
+		// reconcile again to propagate the updated secrets
+		rr = env.ShouldReconcile(testutils.RequestFromObject(c1))
+		Expect(rr.RequeueAfter).To(BeZero())
+
+		// verify updated secret data on platform cluster
+		Expect(env.Client().List(env.Ctx, ss, client.InNamespace(c1.Namespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ContainElement(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-auth-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"key": []byte("rotated-value")}),
+			}),
+		))
+
+		// verify updated secret data on target cluster
+		Expect(fakeClientMapping["foo/cluster-01"].List(env.Ctx, ss, client.InNamespace(cluster.TargetClusterNamespace), client.MatchingLabels(expectedLabels))).To(Succeed())
+		Expect(ss.Items).To(ContainElement(
+			MatchFields(IgnoreExtras, Fields{
+				"ObjectMeta": MatchFields(IgnoreExtras, Fields{
+					"Name": Equal("my-target-secret-copy"),
+				}),
+				"Data": Equal(map[string][]byte{"foobar": []byte("rotated-foobar")}),
+			}),
+		))
+	})
+
 })

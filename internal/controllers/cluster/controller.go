@@ -961,5 +961,63 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			predicate.GenerationChangedPredicate{},
 			ctrlutils.ExactNamePredicate(r.ProviderName, ""),
 		))).
+		// watch source Secrets in provider namespace and reconcile all known Clusters if a referenced secret changes
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToRequests),
+			builder.WithPredicates(
+				predicate.NewPredicateFuncs(func(object client.Object) bool {
+					return object.GetNamespace() == r.ProviderNamespace
+				}),
+			)).
 		Complete(r)
+}
+
+// mapSecretToRequests checks if the changed secret is referenced in the DNSServiceConfig or PlatformService (external dns credentials or image pull secrets) and if so, returns a request for each known Cluster to trigger their reconciliation.
+func (r *ClusterReconciler) mapSecretToRequests(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := logging.FromContextOrDiscard(ctx)
+	secret, ok := obj.(*corev1.Secret)
+	if !ok || secret.Namespace != r.ProviderNamespace {
+		return nil
+	}
+
+	config := &dnsv1alpha1.DNSServiceConfig{}
+	if err := r.PlatformCluster.Client().Get(ctx, types.NamespacedName{Name: r.ProviderName}, config); err != nil {
+		log.Error(err, "Failed to get DNSServiceConfig while checking secret relevance")
+		return nil
+	}
+
+	platformService := &providerv1alpha1.PlatformService{}
+	platformService.Name = r.ProviderName
+	if err := r.PlatformCluster.Client().Get(ctx, client.ObjectKeyFromObject(platformService), platformService); err != nil {
+		log.Error(err, "Failed to get PlatformService while checking secret relevance")
+		return nil
+	}
+
+	secretsSet := extractReferencedSecretNames(config, platformService)
+	if !secretsSet.Has(secret.Name) {
+		return nil
+	}
+
+	log.Info("Source secret changed, re-queuing known clusters", "secret", secret.Name)
+	return collections.ProjectSliceToSlice(r.listKnownClusters(), func(namespace types.NamespacedName) ctrl.Request {
+		return ctrl.Request{NamespacedName: namespace}
+	})
+}
+
+// extractReferencedSecretNames returns the set of secret names referenced by the given DNSServiceConfig and PlatformService.
+func extractReferencedSecretNames(config *dnsv1alpha1.DNSServiceConfig, platformService *providerv1alpha1.PlatformService) sets.Set[string] {
+	secretNames := sets.New[string]()
+	if config.Spec.SecretsToCopy != nil {
+		for _, secretRef := range config.Spec.SecretsToCopy.ToPlatformCluster {
+			secretNames.Insert(secretRef.Source.Name)
+		}
+		for _, secretRef := range config.Spec.SecretsToCopy.ToTargetCluster {
+			secretNames.Insert(secretRef.Source.Name)
+		}
+	}
+	if platformService != nil {
+		for _, pullSecret := range platformService.Spec.ImagePullSecrets {
+			secretNames.Insert(pullSecret.Name)
+		}
+	}
+	return secretNames
 }
