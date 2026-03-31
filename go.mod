@@ -5,7 +5,7 @@ go 1.26.1
 replace github.com/openmcp-project/platform-service-dns/api => ./api
 
 require (
-	github.com/fluxcd/helm-controller/api v1.5.2
+	github.com/fluxcd/helm-controller/api v1.5.3
 	github.com/fluxcd/pkg/apis/meta v1.26.0
 	github.com/fluxcd/source-controller/api v1.8.1
 	github.com/openmcp-project/controller-utils v0.26.0
