@@ -155,7 +155,7 @@ type DNSServiceConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&DNSServiceConfig{}, &DNSServiceConfigList{})
+	RegisterToSchemeBuilder(&DNSServiceConfig{}, &DNSServiceConfigList{})
 }
 
 // Matches returns true if the selector matches the given list of purposes.
