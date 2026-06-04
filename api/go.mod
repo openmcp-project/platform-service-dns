@@ -1,11 +1,11 @@
 module github.com/openmcp-project/platform-service-dns/api
 
-go 1.26.1
+go 1.26.2
 
 require (
-	github.com/fluxcd/helm-controller/api v1.5.3
-	github.com/fluxcd/source-controller/api v1.8.4
-	github.com/openmcp-project/openmcp-operator/api v0.18.1
+	github.com/fluxcd/helm-controller/api v1.5.5
+	github.com/fluxcd/source-controller/api v1.8.5
+	github.com/openmcp-project/openmcp-operator/api v0.21.0
 	k8s.io/apiextensions-apiserver v0.36.1
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
@@ -66,7 +66,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
-	github.com/openmcp-project/controller-utils v0.28.0
+	github.com/openmcp-project/controller-utils v0.29.0
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/net v0.54.0 // indirect
