@@ -1,16 +1,16 @@
 module github.com/openmcp-project/platform-service-dns
 
-go 1.26.1
+go 1.26.2
 
 replace github.com/openmcp-project/platform-service-dns/api => ./api
 
 require (
-	github.com/fluxcd/helm-controller/api v1.5.3
+	github.com/fluxcd/helm-controller/api v1.5.5
 	github.com/fluxcd/pkg/apis/meta v1.26.0
-	github.com/fluxcd/source-controller/api v1.8.4
-	github.com/openmcp-project/controller-utils v0.28.0
-	github.com/openmcp-project/openmcp-operator/api v0.18.1
-	github.com/openmcp-project/openmcp-operator/lib v0.18.1
+	github.com/fluxcd/source-controller/api v1.8.5
+	github.com/openmcp-project/controller-utils v0.29.0
+	github.com/openmcp-project/openmcp-operator/api v0.21.0
+	github.com/openmcp-project/openmcp-operator/lib v0.21.0
 	github.com/openmcp-project/platform-service-dns/api v0.0.5
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.36.1
