@@ -35,6 +35,14 @@
       "rebaseWhen": "auto",
       "minimumReleaseAge": "0 days",
       "enabled": true
+    },
+    {
+      "description": "Group openmcp-project/build submodule and workflow updates",
+      "matchDepNames": [
+        "hack/common",
+        "openmcp-project/build"
+      ],
+      "groupName": "openmcp-project/build"
     }
   ]
 }
