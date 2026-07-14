@@ -40,7 +40,6 @@
       "semanticCommitType": "chore",
       "rebaseWhen": "auto",
       "minimumReleaseAge": "0 days",
-      "enabled": true,
       "matchPackageNames": [
         "/^github.com/openmcp-project//"
       ]
