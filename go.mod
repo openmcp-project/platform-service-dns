@@ -13,7 +13,7 @@ require (
 	github.com/openmcp-project/controller-utils v0.31.0
 	github.com/openmcp-project/openmcp-operator/api v1.2.0
 	github.com/openmcp-project/openmcp-operator/lib v1.2.0
-	github.com/openmcp-project/platform-service-dns/api v0.1.0
+	github.com/openmcp-project/platform-service-dns/api v0.2.0
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
