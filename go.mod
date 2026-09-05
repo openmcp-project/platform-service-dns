@@ -7,7 +7,7 @@ replace github.com/openmcp-project/platform-service-dns/api => ./api
 require (
 	github.com/fluxcd/helm-controller/api v1.6.3
 	github.com/fluxcd/pkg/apis/meta v1.31.0
-	github.com/fluxcd/source-controller/api v1.9.4
+	github.com/fluxcd/source-controller/api v1.9.5
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
 	github.com/openmcp-project/controller-utils v0.33.0
