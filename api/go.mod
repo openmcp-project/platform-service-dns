@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/fluxcd/helm-controller/api v1.6.4
-	github.com/fluxcd/source-controller/api v1.9.4
+	github.com/fluxcd/source-controller/api v1.9.5
 	github.com/openmcp-project/controller-utils v0.33.0
 	github.com/openmcp-project/openmcp-operator/api v1.4.0
 	k8s.io/apiextensions-apiserver v0.37.0
