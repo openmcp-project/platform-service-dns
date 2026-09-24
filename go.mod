@@ -9,7 +9,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.32.0
 	github.com/fluxcd/source-controller/api v1.9.5
 	github.com/onsi/ginkgo/v2 v2.32.2
-	github.com/onsi/gomega v1.43.0
+	github.com/onsi/gomega v1.43.1
 	github.com/openmcp-project/controller-utils v0.33.1
 	github.com/openmcp-project/openmcp-operator/api v1.4.1
 	github.com/openmcp-project/openmcp-operator/lib v1.4.1
