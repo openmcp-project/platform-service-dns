@@ -1,6 +1,6 @@
 module github.com/openmcp-project/platform-service-dns
 
-go 1.27.1
+go 1.27.2
 
 replace github.com/openmcp-project/platform-service-dns/api => ./api
 
