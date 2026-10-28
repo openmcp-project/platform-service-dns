@@ -10,9 +10,9 @@ require (
 	github.com/fluxcd/source-controller/api v1.9.6
 	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
-	github.com/openmcp-project/controller-utils v0.33.2
-	github.com/openmcp-project/openmcp-operator/api v1.4.1
-	github.com/openmcp-project/openmcp-operator/lib v1.4.1
+	github.com/openmcp-project/controller-utils v0.33.3
+	github.com/openmcp-project/openmcp-operator/api v1.4.2
+	github.com/openmcp-project/openmcp-operator/lib v1.4.2
 	github.com/openmcp-project/platform-service-dns/api v0.2.2
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.37.1
