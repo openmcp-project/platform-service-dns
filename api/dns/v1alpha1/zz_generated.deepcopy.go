@@ -8,7 +8,7 @@ import (
 	apiv1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/openmcp-project/openmcp-operator/api/common"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
