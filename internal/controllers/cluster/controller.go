@@ -632,7 +632,7 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 		if rr.SourceKind == SourceKindOCIRepository {
 			hr.Spec.Chart = nil
 			hr.Spec.ChartRef = &fluxhelmv2.CrossNamespaceSourceReference{
-				APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+				APIVersion: fluxsourcev1.GroupVersion.String(),
 				Kind:       rr.SourceKind,
 				Name:       hr.Name,
 				Namespace:  hr.Namespace,
@@ -641,8 +641,8 @@ func (r *ClusterReconciler) deployHelmRelease(ctx context.Context, c *clustersv1
 			hr.Spec.ChartRef = nil
 			hr.Spec.Chart = &fluxhelmv2.HelmChartTemplate{
 				Spec: fluxhelmv2.HelmChartTemplateSpec{
-					SourceRef: fluxhelmv2.CrossNamespaceObjectReference{
-						APIVersion: fluxsourcev1.SchemeBuilder.GroupVersion.String(),
+					SourceRef: &fluxhelmv2.CrossNamespaceObjectReference{
+						APIVersion: fluxsourcev1.GroupVersion.String(),
 						Kind:       rr.SourceKind,
 						Name:       hr.Name,
 						Namespace:  hr.Namespace,
